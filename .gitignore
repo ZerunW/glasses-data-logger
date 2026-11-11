@@ -1,0 +1,24 @@
+*.xcframework/
+
+# Local tooling and build files
+.DS_Store
+.claude/
+.codex/
+.agents/
+xcuserdata/
+*.xcuserstate
+DerivedData/
+.build/
+*.xcresult
+*.log
+
+# Local credentials, signing, and recordings
+.env
+.env.*
+*.mobileprovision
+*.p12
+*.p8
+*.pem
+*.key
+*.xcarchive
+Recordings/
