@@ -26,8 +26,8 @@ final class SensorManager {
     }
   }
   var latestDeviceState: DeviceState?
-  var motionState = "未连接"
-  var inputsState = "未连接"
+  var motionState = "Disconnected"
+  var inputsState = "Disconnected"
   var motionError: String?
   var inputsError: String?
   var latestSample: MotionSample?
@@ -54,6 +54,7 @@ final class SensorManager {
   @ObservationIgnored private var inputsTokens: [any AnyListenerToken] = []
   @ObservationIgnored private var deviceToken: (any AnyListenerToken)?
   @ObservationIgnored private var recentSampleTimes: [UInt64] = []
+  @ObservationIgnored private var lastDisplayUpdateNs: UInt64 = 0
   @ObservationIgnored private var generation = UUID()
 
   func attach(to session: DeviceSession) async {
@@ -62,6 +63,7 @@ final class SensorManager {
     inputsError = nil; motionError = nil; latestSample = nil; latestDeviceState = nil
     acceleration.removeAll(); gyroscope.removeAll(); magnetometer.removeAll(); inputs.removeAll()
     recentSampleTimes.removeAll(); samplesPerSecond = 0
+    lastDisplayUpdateNs = 0
     let current = generation
     let callbacks = self.callbacks
     timerTask = Task { [weak self] in
@@ -84,7 +86,7 @@ final class SensorManager {
     startMotion()
     do {
       guard let capability = try session.addInputs(configuration: InputsConfiguration(consumeBack: false)) else {
-        inputsError = "Inputs 未能启动"; return
+        inputsError = "Unable to start Inputs"; return
       }
       inputsCapability = capability
       inputsState = capability.state.description
@@ -95,7 +97,7 @@ final class SensorManager {
         capability.errorPublisher.listen { [weak self] error in
           Task { @MainActor [weak self] in
             guard let self, self.generation == current else { return }
-            self.inputsError = error == .permissionDenied ? "该实验功能未被授权" : error.description
+            self.inputsError = error == .permissionDenied ? "This experimental feature is not authorized" : error.description
           }
         }
       ]
@@ -145,7 +147,7 @@ final class SensorManager {
     let callbacks = self.callbacks
     do {
       guard let capability = try session.addMotion(configuration: MotionConfiguration(samplingRate: rate)) else {
-        motionError = "Motion 未能启动"; return
+        motionError = "Unable to start Motion"; return
       }
       motion = capability
       motionError = nil
@@ -174,6 +176,12 @@ final class SensorManager {
     } catch { motionError = error.localizedDescription }
   }
   private func accept(_ sample: MotionSample, time: UInt64) {
+    recentSampleTimes.append(time)
+    // Recording receives every sample on the consumer task. Limit chart and
+    // observable updates to 10 Hz so high-rate streams do not redraw the entire panel.
+    guard time >= lastDisplayUpdateNs,
+      time - lastDisplayUpdateNs >= 100_000_000 || lastDisplayUpdateNs == 0 else { return }
+    lastDisplayUpdateNs = time
     latestSample = sample
     func append(_ vector: MWDATMotion.Vector3?, to points: inout [SensorPoint]) {
       if let vector { points.append(SensorPoint(timeNs: time, x: Double(vector.x), y: Double(vector.y), z: Double(vector.z))) }
@@ -181,7 +189,6 @@ final class SensorManager {
     append(sample.accelerometer, to: &acceleration)
     append(sample.gyroscope, to: &gyroscope)
     append(sample.magnetometer, to: &magnetometer)
-    recentSampleTimes.append(time)
     refreshWindow(MonotonicClock.nowNanoseconds())
   }
   private func refreshWindow(_ now: UInt64) {
@@ -202,7 +209,7 @@ final class SensorManager {
     await task?.value
     for token in motionTokens { await token.cancel() }; motionTokens.removeAll()
     if motion != nil {
-      do { try session?.removeMotion() } catch { motionError = "移除 Motion 失败: \(error.localizedDescription)"; return false }
+      do { try session?.removeMotion() } catch { motionError = "Failed to remove Motion: \(error.localizedDescription)"; return false }
     }
     motion = nil
     return true
@@ -221,17 +228,18 @@ final class SensorManager {
     await task?.value
     for token in inputsTokens { await token.cancel() }; inputsTokens.removeAll()
     if inputsCapability != nil {
-      do { try session?.removeInputs() } catch { inputsError = "移除 Inputs 失败: \(error.localizedDescription)" }
+      do { try session?.removeInputs() } catch { inputsError = "Failed to remove Inputs: \(error.localizedDescription)" }
     }
     inputsCapability = nil
     await deviceToken?.cancel(); deviceToken = nil
     session = nil
     latestSample = nil
     recentSampleTimes.removeAll()
+    lastDisplayUpdateNs = 0
     samplesPerSecond = 0
     acceleration.removeAll()
     gyroscope.removeAll()
     magnetometer.removeAll()
-    motionState = "未连接"; inputsState = "未连接"
+    motionState = "Disconnected"; inputsState = "Disconnected"
   }
 }

@@ -122,23 +122,23 @@ struct MockDeviceCardView: View {
               }
             }
 
-            Text("模拟传感器与输入").font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
-            MockDeviceKitButton("加载 Motion 测试数据") { viewModel.setMotionFeed() }
+            Text("Simulated sensors and inputs").font(.subheadline).frame(maxWidth: .infinity, alignment: .leading)
+            MockDeviceKitButton("Load motion test data") { viewModel.setMotionFeed() }
             HStack {
               Button("↑") { viewModel.device.services.input.navUp() }
               Button("↓") { viewModel.device.services.input.navDown() }
               Button("←") { viewModel.device.services.input.navLeft() }
               Button("→") { viewModel.device.services.input.navRight() }
-              Button("选择") { viewModel.device.services.input.select() }
-              Button("返回") { viewModel.device.services.input.back() }
+              Button("Select") { viewModel.device.services.input.select() }
+              Button("Back") { viewModel.device.services.input.back() }
             }
             HStack {
-              Button("按钮") { viewModel.device.services.input.button() }
-              Button("短按") { viewModel.device.services.input.capture(pressType: .shortPress) }
-              Button("长按") { viewModel.device.services.input.capture(pressType: .hold) }
-              Button("双按") { viewModel.device.services.input.capture(pressType: .doublePress) }
+              Button("Button") { viewModel.device.services.input.button() }
+              Button("Short press") { viewModel.device.services.input.capture(pressType: .shortPress) }
+              Button("Long press") { viewModel.device.services.input.capture(pressType: .hold) }
+              Button("Double press") { viewModel.device.services.input.capture(pressType: .doublePress) }
             }
-            Button("拖动") {
+            Button("Drag") {
               let input = viewModel.device.services.input
               input.drag(action: .down, x: 0, y: 0, dx: 0, dy: 0)
               input.drag(action: .move, x: 1, y: 1, dx: 1, dy: 1)

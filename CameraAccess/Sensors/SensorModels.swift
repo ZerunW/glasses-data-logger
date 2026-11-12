@@ -37,20 +37,20 @@ func eulerDegrees(_ q: MWDATMotion.Quaternion?) -> EulerDegrees? {
 func inputDescription(_ event: InputEvent) -> String {
   let detail: String
   switch event {
-  case .nav(let direction, _, _): detail = "导航 \(direction)"
-  case .select: detail = "选择"
-  case .back: detail = "返回"
-  case .button(let button, _, _): detail = "按钮 \(button)"
+  case .nav(let direction, _, _): detail = "Navigation \(direction)"
+  case .select: detail = "Select"
+  case .back: detail = "Back"
+  case .button(let button, _, _): detail = "Button \(button)"
   case .capture(let press, _, _):
     switch press {
-    case .shortPress: detail = "拍摄 短按"
-    case .hold: detail = "拍摄 长按"
-    case .doublePress: detail = "拍摄 双击"
-    @unknown default: detail = "拍摄 未知"
+    case .shortPress: detail = "Capture Short press"
+    case .hold: detail = "Capture Long press"
+    case .doublePress: detail = "Capture Double press"
+    @unknown default: detail = "Capture Unknown"
     }
   case .drag(let action, let x, let y, let dx, let dy, _, _):
-    detail = "拖动 \(action) x:\(x) y:\(y) dx:\(dx) dy:\(dy)"
-  @unknown default: detail = "未知输入"
+    detail = "Drag \(action) x:\(x) y:\(y) dx:\(dx) dy:\(dy)"
+  @unknown default: detail = "Unknown input"
   }
   return "\(detail) · \(event.source) · \(event.timestampMs) ms"
 }

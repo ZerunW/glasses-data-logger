@@ -26,6 +26,7 @@ struct CameraView: View {
   @Bindable var wearablesVM: WearablesViewModel
   @State private var showSettingsMenu: Bool = false
   @State private var isLaunchingUpdate: Bool = false
+  @State private var showBroadcast = false
 
   init(wearables: WearablesInterface, wearablesVM: WearablesViewModel) {
     self._viewModel = State(wrappedValue: CameraViewModel(wearables: wearables))
@@ -105,6 +106,37 @@ struct CameraView: View {
       Button("Cancel", role: .cancel) {}
     } message: {
       Text("To preview your glasses camera, you'll be taken to the Meta AI app to grant access, then returned here.")
+    }
+    .alert("Allow video connection?", isPresented: $viewModel.showBroadcastApproval) {
+      Button("Reject", role: .cancel) { viewModel.resolveBroadcastConnection(allow: false) }
+      Button("Allow") { viewModel.resolveBroadcastConnection(allow: true) }
+    } message: {
+      Text("A device at \(viewModel.broadcastPeer) wants to view your camera. Approve within five seconds. Only allow a connection you initiated. Wi-Fi video is not encrypted.")
+    }
+    .sheet(isPresented: $showBroadcast) {
+      NavigationStack {
+        Form {
+          Section("Mac camera") {
+            Text("Open TetherCam on your Mac. USB connects automatically. For Wi-Fi, launch TetherCam with --debug-tcp and one of the addresses below. This connection has no password or encryption; only use it on a trusted network. Keep this app in the foreground.")
+            Toggle("Allow unencrypted Wi-Fi connections", isOn: $viewModel.broadcastWiFiEnabled)
+              .disabled(viewModel.isBroadcasting)
+            Button(viewModel.isBroadcasting ? "Stop broadcast" : "Start broadcast") { viewModel.toggleBroadcast() }
+              .disabled(!viewModel.isBroadcasting && !viewModel.isStreaming)
+            if let status = viewModel.broadcastStatus {
+              Text(status).textSelection(.enabled)
+              if status.contains(":7878") { ShareLink(item: status) }
+            }
+          }
+        }
+        .navigationTitle("Mac camera")
+        .toolbar { Button("Done") { showBroadcast = false } }
+        .alert("Allow video connection?", isPresented: $viewModel.showBroadcastApproval) {
+          Button("Reject", role: .cancel) { viewModel.resolveBroadcastConnection(allow: false) }
+          Button("Allow") { viewModel.resolveBroadcastConnection(allow: true) }
+        } message: {
+          Text("A device at \(viewModel.broadcastPeer) wants to view your camera. Approve within five seconds. Only allow a connection you initiated. Wi-Fi video is not encrypted.")
+        }
+      }
     }
     .navigationBarHidden(true)
   }
@@ -231,6 +263,8 @@ struct CameraView: View {
       }
 
       Spacer()
+
+      iconButton("video.badge.waveform", id: "mac_camera_button") { showBroadcast = true }
 
       // Top bar carries only the app-level settings/Disconnect control.
       iconButton("gearshape", id: "settings_button") {

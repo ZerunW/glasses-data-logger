@@ -18,8 +18,8 @@ final class SensorModelsTests: XCTestCase {
   }
 
   func testCapturePressesHaveDistinctLabels() {
-    XCTAssertTrue(inputDescription(.capture(.shortPress, source: .captureButton, timestampMs: 1)).contains("短按"))
-    XCTAssertTrue(inputDescription(.capture(.hold, source: .captureButton, timestampMs: 2)).contains("长按"))
-    XCTAssertTrue(inputDescription(.capture(.doublePress, source: .captureButton, timestampMs: 3)).contains("双击"))
+    XCTAssertTrue(inputDescription(.capture(.shortPress, source: .captureButton, timestampMs: 1)).contains("Short press"))
+    XCTAssertTrue(inputDescription(.capture(.hold, source: .captureButton, timestampMs: 2)).contains("Long press"))
+    XCTAssertTrue(inputDescription(.capture(.doublePress, source: .captureButton, timestampMs: 3)).contains("Double press"))
   }
 }

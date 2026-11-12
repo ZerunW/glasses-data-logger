@@ -19,6 +19,14 @@ Apple's free developer accounts support Background Modes and Keychain Sharing. T
 
 Test the data link with the Adventurer and its installed firmware. If the glasses require the app to establish a Wi-Fi link using either restricted capability, free provisioning may prevent that link from working.
 
+## Privacy and security
+
+Recordings include video, optional glasses microphone audio, motion samples, input events, and device status. They are stored in the app's Documents directory, visible through iPhone Files and Finder File Sharing, and may be included in the device's backups. Delete recordings you no longer need. Photos and videos shared with another app are subject to that app's handling.
+
+The app sets `MWDAT.CrashReporting.OptOut` to `true`, as supported by Meta SDK 1.0.1. This only opts out of the SDK crash-reporting feature; registration, camera permission flows, device connection, and other Meta SDK behavior may still exchange data. Refer to [Meta's developer documentation](https://wearables.developer.meta.com/docs/develop/) for its current practices.
+
+Camera streaming is disabled until started. USB mode binds the sender to iPhone loopback and requires approval for each connection. Wi-Fi must be enabled separately and resets on stop. Wi-Fi traffic is unencrypted and IUCM has no cryptographic peer authentication, so use only on trusted networks. The connection prompt does not prove the peer's identity. TetherCam's third-party camera extension has a separate local sink policy and TetherCam's own update-check settings; consult its [privacy policy](https://tethercam.app/privacy).
+
 ## Configure Meta Developer Mode
 
 - Enable Developer Mode for the glasses in the Meta AI app. Pair them with the iPhone, power them on, unfold them, and put them on.
@@ -38,7 +46,27 @@ Test the data link with the Adventurer and its installed firmware. If the glasse
 7. If the app goes into the background, the session ends, or the glasses disconnect, the app stops the active recording, flushes the CSV buffers, and closes the files. Start a new session as needed. Wait for saving to finish before recording another clip.
 8. Find recordings in **Files → Browse → On My iPhone → GlassesData → Recordings**. You can also copy a recording folder with iPhone File Sharing in Finder.
 
-The panel shows the latest **10 seconds** of sensor history and **20 input events**. CSV logging includes every sample and event the app receives while recording. Missing components appear as unavailable in the panel and as empty CSV fields. Transport interruptions or full SDK buffers can cause samples to be lost before the app receives them.
+The panel shows the latest **10 seconds** of sensor history and **20 input events**. The chart and latest-value display update at up to 10 Hz to reduce UI overhead; the samples-per-second indicator counts all received samples. CSV logging includes every sample and event the app receives while recording. Missing components appear as unavailable in the panel and as empty CSV fields. Transport interruptions or full SDK buffers can cause samples to be lost before the app receives them.
+
+## Mac camera output with TetherCam
+
+GlassesData can send the existing HEVC camera stream to the signed TetherCam for Mac app. TetherCam provides the system camera used by Zoom and other macOS apps. The iPhone sender does not need a paid Apple Developer account.
+
+1. Download the signed Mac app from [TetherCam releases](https://github.com/Kanevry/tethercam/releases) and follow its instructions to install it in Applications and approve its camera extension.
+2. On the iPhone, start the glasses session and preview. Tap the **Mac camera** icon and start broadcasting. The sender defaults to a loopback-only TCP listener on port 7878 for USB. Each connection requires approval on the iPhone before video is sent. TetherCam waits five seconds for its handshake, so approve promptly; it will retry if the request times out. The sender stops when the preview or session ends.
+3. For USB, connect the iPhone with a data cable, trust the Mac when prompted, and open TetherCam. TetherCam connects through usbmuxd. It does not require an iPhone Personal Hotspot.
+4. For Wi-Fi, connect both devices to the same trusted network, stop broadcasting and enable **Allow unencrypted Wi-Fi connections**, then start broadcasting again. Quit TetherCam if it is running, then launch its Mac binary from Terminal using the IP address displayed by GlassesData:
+
+   ```bash
+   /Applications/TetherCam.app/Contents/MacOS/TetherCam --debug-tcp IPHONE_IP:7878
+   ```
+
+   This is TetherCam's debug TCP mode rather than its normal USB connection. If several addresses are shown, choose the one reachable from your Mac. USB and Wi-Fi cannot receive simultaneously.
+5. Select **TetherCam** as the camera in Zoom or another application. The source is the glasses stream, configured at 24 fps. TetherCam's camera may present a 30 fps output by repeating frames; that does not make the glasses capture 30 fps.
+
+GlassesData asks for approval on the iPhone for each incoming connection and defaults to a loopback-only listener for USB. The IUCM protocol has no cryptographic peer authentication or transport encryption. An approved Wi-Fi stream can be observed or modified by someone with network access. Only approve connections you initiated, use Wi-Fi on a trusted network, and stop broadcasting when finished. The approved endpoint display is informational and does not prove device identity. The signed TetherCam extension has its own local sink authorization behavior and is not modified by this project. The TetherCam camera extension carries video only. Local recording and optional HFP audio recording remain separate.
+
+The TetherCam compatibility layer includes MIT-licensed protocol code. See `CameraAccess/Streaming/TetherCam-LICENSE.txt`. The iOS app and test targets compile without signing. A local test passed actual HEVC from the bundled sample through the GlassesData sender to the unmodified TetherCam receiver and decoder. Real-glasses USB, Wi-Fi, format changes, latency, and Zoom use still need device testing.
 
 ## Recording files and timestamps
 

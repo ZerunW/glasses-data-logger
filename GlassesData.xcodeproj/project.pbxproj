@@ -45,6 +45,9 @@
 		FA2200000000000000000003 /* SensorPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA2100000000000000000003 /* SensorPanelView.swift */; };
 		FA2200000000000000000004 /* MonotonicClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA2100000000000000000004 /* MonotonicClock.swift */; };
 		FA2200000000000000000005 /* RecordingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA2100000000000000000005 /* RecordingStore.swift */; };
+		FB2200000000000000000001 /* CameraBroadcast.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000001; };
+		FB2200000000000000000002 /* IucmMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000002; };
+		FB2200000000000000000003 /* IucmFrameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000003; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -116,6 +119,9 @@
 		FA2100000000000000000004 /* MonotonicClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CameraAccess/Recording/MonotonicClock.swift"; sourceTree = SOURCE_ROOT; };
 		FA2100000000000000000005 /* RecordingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CameraAccess/Recording/RecordingStore.swift"; sourceTree = SOURCE_ROOT; };
 		FA2100000000000000000006 /* PersonalTeam.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CameraAccess/PersonalTeam.entitlements; sourceTree = SOURCE_ROOT; };
+		FB2100000000000000000001 /* CameraBroadcast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/CameraBroadcast.swift; sourceTree = SOURCE_ROOT; };
+		FB2100000000000000000002 /* IucmMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/IucmMessage.swift; sourceTree = SOURCE_ROOT; };
+		FB2100000000000000000003 /* IucmFrameParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/IucmFrameParser.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -151,6 +157,9 @@
 			isa = PBXGroup;
 			children = (
 				8FD96B7D2E6F0A9800F56AB1 /* CameraAccess */,
+				FB2100000000000000000001 /* CameraBroadcast.swift */,
+				FB2100000000000000000003 /* IucmFrameParser.swift */,
+				FB2100000000000000000002 /* IucmMessage.swift */,
 				FA2100000000000000000006 /* PersonalTeam.entitlements */,
 				FA2100000000000000000005 /* RecordingStore.swift */,
 				FA2100000000000000000004 /* MonotonicClock.swift */,
@@ -419,6 +428,9 @@
 			buildActionMask = 2147483647;
 			files = (
 				8FD96B7F2E6F0A9800F56AB1 /* CameraAccessApp.swift in Sources */,
+				FB2200000000000000000001 /* CameraBroadcast.swift in Sources */,
+				FB2200000000000000000003 /* IucmFrameParser.swift in Sources */,
+				FB2200000000000000000002 /* IucmMessage.swift in Sources */,
 				FA2200000000000000000005 /* RecordingStore.swift in Sources */,
 				FA2200000000000000000004 /* MonotonicClock.swift in Sources */,
 				FA2200000000000000000003 /* SensorPanelView.swift in Sources */,

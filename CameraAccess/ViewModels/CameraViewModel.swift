@@ -172,6 +172,61 @@ final class CameraViewModel {
   @ObservationIgnored private var isStoppingForBackground: Bool = false
   @ObservationIgnored private var backgroundStopSuppressionTask: Task<Void, Never>?
 
+  var broadcastStatus: String?
+  var isBroadcasting = false
+  var broadcastWiFiEnabled = false
+  var showBroadcastApproval = false
+  var broadcastPeer = ""
+  private var broadcastApprovalID: UUID?
+  @ObservationIgnored private let broadcast = CameraBroadcast()
+
+  func toggleBroadcast() {
+    if isBroadcasting {
+      stopBroadcast()
+    } else {
+      guard isStreaming else { return }
+      isBroadcasting = true
+      broadcastStatus = "Starting…"
+      broadcast.start(allowWiFi: broadcastWiFiEnabled, onStatus: { [weak self] status in
+        Task { @MainActor in
+          guard let self, self.isBroadcasting else { return }
+          self.broadcastStatus = status
+          if status.hasPrefix("Broadcast failed:") {
+            self.isBroadcasting = false
+            self.broadcastWiFiEnabled = false
+          }
+          if status == "Connection approval timed out." || status.hasPrefix("Disconnected.") {
+            self.showBroadcastApproval = false
+            self.broadcastApprovalID = nil
+          }
+        }
+      }, onApproval: { [weak self] id, peer in
+        Task { @MainActor in
+          guard let self, self.isBroadcasting else { return }
+          self.broadcastApprovalID = id
+          self.broadcastPeer = peer
+          self.showBroadcastApproval = true
+        }
+      })
+    }
+  }
+
+  private func stopBroadcast() {
+    broadcast.stop()
+    showBroadcastApproval = false
+    broadcastApprovalID = nil
+    isBroadcasting = false
+    broadcastWiFiEnabled = false
+    broadcastStatus = nil
+  }
+
+  func resolveBroadcastConnection(allow: Bool) {
+    guard let id = broadcastApprovalID else { return }
+    broadcastApprovalID = nil
+    showBroadcastApproval = false
+    broadcast.resolveConnection(id, allow: allow)
+  }
+
   @ObservationIgnored private let videoRecorder = VideoRecorder()
   // Decodes compressed hvc1 frames for on-screen preview. Not required for
   // recording — the passthrough writer handles compressed frames directly.
@@ -204,6 +259,7 @@ final class CameraViewModel {
     appLifecycleTask?.cancel()
     backgroundStopSuppressionTask?.cancel()
     recordingErrorTask?.cancel()
+    broadcast.stop()
     deviceSession?.stop()
   }
 
@@ -641,6 +697,7 @@ final class CameraViewModel {
 
       // Decode the compressed hvc1 frame for preview off the main actor.
       let previewImage = self.videoFrameDecoder.decode(frame.sampleBuffer)
+      self.broadcast.submit(frame.sampleBuffer)
 
       Task { @MainActor [weak self] in
         guard let self else { return }
@@ -675,6 +732,7 @@ final class CameraViewModel {
   private func handleStreamStateChange(_ state: StreamState) {
     streamState = state
     if state == .stopped {
+      stopBroadcast()
       // Terminal — finalize any recording, then converge teardown. Covers both
       // user-initiated stop and SDK auto-stop (disconnect, error, session end).
       Task { await stopVideoRecording() }

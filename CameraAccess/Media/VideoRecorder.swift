@@ -133,11 +133,13 @@ final class VideoRecorder: Sendable {
         let noopUnavailable: @Sendable () -> Void = {}
         let onGlassesAudioUnavailable =
           state.withLockUnchecked { $0.onGlassesAudioUnavailable } ?? noopUnavailable
+        let onAudioWritten: @Sendable () -> Void =
+          state.withLockUnchecked { $0.onAudioWritten } ?? noopUnavailable
         audioHandler = AudioCaptureHandler(
           writer: writer,
           recordingStartTime: startTime,
           onGlassesAudioUnavailable: onGlassesAudioUnavailable,
-          onAudioWritten: state.withLockUnchecked { $0.onAudioWritten } ?? {}
+          onAudioWritten: onAudioWritten
         )
       }
 
