@@ -25,12 +25,6 @@ import MWDATMockDevice
 
 @main
 struct CameraAccessApp: App {
-  #if DEBUG
-  // Debug menu for simulating device connections during development. The
-  // ladybug button toggles `showDebugMenu`; the sheet hosts the mock device kit.
-  @State private var showDebugMenu = false
-  @State private var mockDeviceKitViewModel = MockDeviceKitViewModel(mockDeviceKit: MockDeviceKit.shared)
-  #endif
   private let wearables: WearablesInterface
   @State private var wearablesViewModel: WearablesViewModel
 
@@ -78,14 +72,6 @@ struct CameraAccessApp: App {
         } message: {
           Text(wearablesViewModel.errorMessage)
         }
-        #if DEBUG
-      .sheet(isPresented: $showDebugMenu) {
-        MockDeviceKitView(viewModel: mockDeviceKitViewModel)
-      }
-      .overlay {
-        DebugMenuView(showDebugMenu: $showDebugMenu)
-      }
-        #endif
 
       // Registration view handles the flow for connecting to the glasses via Meta AI
       RegistrationView(viewModel: wearablesViewModel)

@@ -25,7 +25,7 @@ Recordings include video, optional glasses microphone audio, motion samples, inp
 
 The app sets `MWDAT.CrashReporting.OptOut` to `true`, as supported by Meta SDK 1.0.1. This only opts out of the SDK crash-reporting feature; registration, camera permission flows, device connection, and other Meta SDK behavior may still exchange data. Refer to [Meta's developer documentation](https://wearables.developer.meta.com/docs/develop/) for its current practices.
 
-Camera streaming is disabled until started. USB mode binds the sender to iPhone loopback and requires approval for each connection. Wi-Fi must be enabled separately and resets on stop. Wi-Fi traffic is unencrypted and IUCM has no cryptographic peer authentication, so use only on trusted networks. The connection prompt does not prove the peer's identity. TetherCam's third-party camera extension has a separate local sink policy and TetherCam's own update-check settings; consult its [privacy policy](https://tethercam.app/privacy).
+Camera streaming is disabled until started. USB mode binds the sender to iPhone loopback and requires approval for each connection. Wi-Fi must be enabled separately and resets on stop. Wi-Fi uses TLS and requires approval on the iPhone. Paired devices keep a device-local secret for reconnection; when no paired device exists, the app uses a temporary key displayed on the iPhone. TetherCam's third-party camera extension has a separate local sink policy and TetherCam's own update-check settings; consult its [privacy policy](https://tethercam.app/privacy).
 
 ## Configure Meta Developer Mode
 
@@ -39,7 +39,7 @@ Camera streaming is disabled until started. USB mode binds the sender to iPhone 
 
 1. Tap **Connect**, complete registration in Meta AI, and return to GlassesData. Grant Bluetooth and local network access if prompted.
 2. Tap **Start session**. Motion and Inputs attach once the session reaches `.started`. The sensors are available independently of the camera preview.
-3. Expand the **Sensor Panel**. Choose 5, 10, 15, 24, 30, or 60 Hz. The default is **30 Hz**. Changing the rate reattaches Motion. The rate picker is disabled during recording.
+3. The **Sensor Panel** stays visible above the capture controls. Scroll inside it to view the charts, recent inputs, and device state. Choose 5, 10, 15, 24, 30, or 60 Hz. The default is **30 Hz**. Changing the rate reattaches Motion. The rate picker is disabled during recording.
 4. Tap **Preview**. For first use, follow the camera permission prompts in Meta AI and return to the app. Use the existing controls to take and share photos.
 5. Use the microphone button to enable the glasses' Bluetooth HFP microphone. The app records microphone audio only if permission is granted and the glasses' HFP input is available.
 6. Tap **Record** to capture video and sensor data together. Tap again to stop. After saving, you can play or share the video. Dismissing playback leaves the archive in place.
@@ -50,23 +50,22 @@ The panel shows the latest **10 seconds** of sensor history and **20 input event
 
 ## Mac camera output with TetherCam
 
-GlassesData can send the existing HEVC camera stream to the signed TetherCam for Mac app. TetherCam provides the system camera used by Zoom and other macOS apps. The iPhone sender does not need a paid Apple Developer account.
+GlassesData Mac includes the original signed TetherCam app as a bundled receiver. Its camera extension provides the system camera used by Zoom and other macOS apps. The iPhone only needs GlassesData; the TetherCam iPhone app is not used. The iPhone sender does not need a paid Apple Developer account.
 
-1. Download the signed Mac app from [TetherCam releases](https://github.com/Kanevry/tethercam/releases) and follow its instructions to install it in Applications and approve its camera extension.
-2. On the iPhone, start the glasses session and preview. Tap the **Mac camera** icon and start broadcasting. The sender defaults to a loopback-only TCP listener on port 7878 for USB. Each connection requires approval on the iPhone before video is sent. TetherCam waits five seconds for its handshake, so approve promptly; it will retry if the request times out. The sender stops when the preview or session ends.
-3. For USB, connect the iPhone with a data cable, trust the Mac when prompted, and open TetherCam. TetherCam connects through usbmuxd. It does not require an iPhone Personal Hotspot.
-4. For Wi-Fi, connect both devices to the same trusted network, stop broadcasting and enable **Allow unencrypted Wi-Fi connections**, then start broadcasting again. Quit TetherCam if it is running, then launch its Mac binary from Terminal using the IP address displayed by GlassesData:
+1. Move GlassesData Mac into Applications and open it. When macOS requests it, approve the TetherCam camera extension in System Settings → General → Login Items & Extensions → Camera Extensions. The TetherCam receiver is included inside GlassesData Mac and is started automatically. Activation from the bundled app on a Mac that has never installed the extension still requires validation.
+2. On the iPhone, start the glasses session and preview. Tap the **Mac camera** icon and start broadcasting. The sender defaults to a loopback-only TCP listener on port 7878 for USB. Each connection requires approval on the iPhone before video is sent. The sender completes the receiver handshake and sends codec format metadata while waiting up to 30 seconds for approval; no video frames are sent before you allow the connection. The sender stops when the preview or session ends.
+3. For USB, select **USB** in GlassesData Mac, connect the iPhone with a data cable, and trust the Mac when prompted. Start USB broadcasting on the iPhone and approve the connection. The bundled receiver connects through usbmuxd. It does not require an iPhone Personal Hotspot.
+4. For Wi-Fi, open **GlassesData Mac** and the iPhone camera preview. On the iPhone, open **Mac camera**, stop broadcasting if needed, and select **Pair a Mac**. On the Mac, select the nearby iPhone and choose **Pair with iPhone**. Scan the QR code shown on the Mac with the iPhone, or enter its six-digit code manually. Confirming the code saves a device-local pairing secret in each device's Keychain. The scanner needs camera access; manual entry is available if scanning fails.
 
-   ```bash
-   /Applications/TetherCam.app/Contents/MacOS/TetherCam --debug-tcp IPHONE_IP:7878
-   ```
+   Select **Encrypted Wi-Fi** on the Mac, then enable **Use encrypted Wi-Fi** on the iPhone and start broadcasting. The Mac app discovers the iPhone and attempts to connect automatically; approve each video connection on the iPhone. Stop broadcasting when finished. To revoke trust, choose **Forget paired Mac** on the iPhone and **Forget device** on the Mac. Pairing a new device replaces the stored device. GlassesData starts its bundled TetherCam receiver in headless mode when the Mac app opens and stops the receiver when the app quits. macOS manages the installed camera extension separately.
 
-   This is TetherCam's debug TCP mode rather than its normal USB connection. If several addresses are shown, choose the one reachable from your Mac. USB and Wi-Fi cannot receive simultaneously.
+   To build the Mac app from source with Xcode installed, obtain the original signed TetherCam Mac app from [TetherCam releases](https://github.com/Kanevry/tethercam/releases) and place it at `/Applications/TetherCam.app`, or point `TETHERCAM_APP` at it. Run `./MacRelay/build.sh` from this project folder. The build verifies the publisher's signature and embeds the original app unchanged. Open `MacRelay/build/GlassesData Mac.app`; you can then move it to Applications. This local GlassesData build is ad-hoc signed and is not notarized. The Mac app follows the system light or dark appearance, as do the iPhone's native panels.
+
 5. Select **TetherCam** as the camera in Zoom or another application. The source is the glasses stream, configured at 24 fps. TetherCam's camera may present a 30 fps output by repeating frames; that does not make the glasses capture 30 fps.
 
-GlassesData asks for approval on the iPhone for each incoming connection and defaults to a loopback-only listener for USB. The IUCM protocol has no cryptographic peer authentication or transport encryption. An approved Wi-Fi stream can be observed or modified by someone with network access. Only approve connections you initiated, use Wi-Fi on a trusted network, and stop broadcasting when finished. The approved endpoint display is informational and does not prove device identity. The signed TetherCam extension has its own local sink authorization behavior and is not modified by this project. The TetherCam camera extension carries video only. Local recording and optional HFP audio recording remain separate.
+The iPhone and Mac relay authenticate each other with a 256-bit random pre-shared key and use TLS 1.2 with AES-GCM. A paired device key persists in the local Keychain until forgotten; the unpaired fallback key is not persisted. This PSK cipher suite does not provide forward secrecy: disclosure of the persistent paired key could expose captured traffic from sessions that used that key. Enter the key privately and stop broadcasting when finished. TetherCam communicates with the relay over Mac loopback, not encrypted; another local process could connect to that port. The iPhone-to-Mac Wi-Fi segment remains protected by TLS. TetherCam's signed camera extension also has its own local sink authorization policy, which this project cannot change. The camera extension carries video only; local recording and optional HFP audio remain separate.
 
-The TetherCam compatibility layer includes MIT-licensed protocol code. See `CameraAccess/Streaming/TetherCam-LICENSE.txt`. The iOS app and test targets compile without signing. A local test passed actual HEVC from the bundled sample through the GlassesData sender to the unmodified TetherCam receiver and decoder. Real-glasses USB, Wi-Fi, format changes, latency, and Zoom use still need device testing.
+The TetherCam compatibility layer includes MIT-licensed protocol code. See `CameraAccess/Streaming/TetherCam-LICENSE.txt`. The iOS app and test targets compile without signing. A local test passed actual HEVC from the bundled sample through the GlassesData sender to the unmodified TetherCam receiver and decoder. Real-glasses USB, encrypted Wi-Fi, format changes, latency, and Zoom use still need device testing.
 
 ## Recording files and timestamps
 
@@ -144,9 +143,9 @@ Optional fields are omitted when unavailable.
 
 ## Test with MockDeviceKit
 
-In a Debug build, open the debug menu using the bug icon and create a mock device. Power it on, unfold it, and mark it as worn. Choose the bundled video or the iPhone camera as the preview source. Use the motion test feed or inject navigation, select, back, button, capture, and drag events. Start the session and wait for Inputs to become active before injecting events. The SDK drops events injected before activation.
+MockDeviceKit is not exposed in the app UI. It is enabled only for UI tests launched with the `--ui-testing` argument; the test harness can then control mock-device setup through the test server. The mock API can simulate device state, camera content, motion samples, and input events.
 
-Use the mock to check the panel and recording files. Verify authorization, IMU output, HFP audio, and the data link with physical glasses. A mock device has no glasses HFP microphone.
+Mock data is useful for checking the sensor panel and recording pipeline. Verify authorization, real IMU output, HFP audio, and the data link with physical glasses. A mock device has no glasses HFP microphone.
 
 ## Build and run tests
 
@@ -160,7 +159,7 @@ xcodebuild -project GlassesData.xcodeproj -scheme GlassesData \
 
 List installed simulators with `xcodebuild -showdestinations -project GlassesData.xcodeproj -scheme GlassesData`. To run the tests, use `-destination 'platform=iOS Simulator,id=SIMULATOR_ID' test` with a simulator ID from that list. The scheme runs tests serially because some CameraAccess tests share a MockDeviceKit singleton.
 
-The delivery environment had only Command Line Tools. The iOS build, simulator run, and signing remain unverified. See the [validation record](Docs/VALIDATION.md) for completed checks.
+An iOS device build and development signing have been verified. No iOS simulator runtime was available for the latest checks; see the [validation record](Docs/VALIDATION.md) for completed checks and remaining limitations.
 
 ## Verify on physical hardware
 
@@ -180,3 +179,13 @@ The app finalizes files during normal lifecycle transitions. Force quitting, abr
 Based on Meta's CameraAccess sample at commit `bbae597` (Release 1.0.1). The implementation was checked against the Swift interfaces distributed with the 1.0.1 XCFrameworks at commit `0bd369298eef6a980ad0bdb6c8a5502f2c02a08c`, the 1.0.0 changelog, and Meta's Motion, Inputs, session lifecycle, and DAT conventions guides.
 
 See the [original CameraAccess README](Docs/CameraAccess-original-README.md) and the [Meta license](LICENSE).
+
+## Local security checks
+
+Run `python3 SecurityTests/tls_integration.py` and `python3 SecurityTests/broadcast_approval.py` on macOS with Xcode command-line tools and an OpenSSL installation that supports TLS 1.2 PSK suites. These tests use public test fixtures and loopback traffic. They check successful TLS, incorrect-key and plaintext rejection, encrypted-record tampering, absence of a known test payload in captured traffic, and the broadcast server's approval behavior. They do not establish physical-device reliability or audit the entire app.
+
+Run `python3 SecurityTests/wireless_interop.py /path/to/tethercam` with a local TetherCam v0.4.0 source checkout to exercise the GlassesData sender and Mac relay over encrypted loopback with the TetherCam receiver and decoder. It delays approval for six seconds, checks that no decoded video arrives before approval, then requires at least ten decoded sample frames. The check does not exercise physical Wi-Fi, the camera extension, or real glasses.
+
+Run `python3 SecurityTests/wireless_wirecheck.py` to inspect the actual protocol messages through the synthetic encrypted relay and check that video frames are gated until approval.
+
+Short-code pairing uses ephemeral X25519 key agreement, a commitment exchange, and confirmation messages. The six-digit code must be transferred in person. Pairing accepts one attempt at a time and must be started explicitly on the iPhone. `python3 SecurityTests/pairing_protocol.py` tests matching codes, wrong codes, and altered commitments with local synthetic peers. This new pairing protocol and the camera scanner have not received independent security review or physical-device validation.

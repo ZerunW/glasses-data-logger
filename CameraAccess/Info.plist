@@ -64,13 +64,15 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_bonjour._tcp</string>
+		<string>_glassesdata._tcp</string>
+		<string>_gdpair._tcp</string>
 	</array>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>Needed to connect to Meta AI Glasses</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>This app needs access to save photos captured from your glasses.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>This app needs camera access to stream from your phone's camera as a mock device feed.</string>
+	<string>Use the iPhone camera to scan a Mac pairing code or provide a mock camera feed.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>This app needs microphone access to record sound from your glasses' microphone alongside video.</string>
 	<key>UIApplicationSceneManifest</key>

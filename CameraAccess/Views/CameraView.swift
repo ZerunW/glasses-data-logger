@@ -15,6 +15,8 @@
 // live DeviceSessionState / StreamState so the state machine is legible.
 //
 
+import AVFoundation
+import VisionKit
 import MWDATCore
 import SwiftUI
 import UIKit
@@ -27,6 +29,9 @@ struct CameraView: View {
   @State private var showSettingsMenu: Bool = false
   @State private var isLaunchingUpdate: Bool = false
   @State private var showBroadcast = false
+  @State private var showPairingScanner = false
+  @State private var pairingScanError: String?
+  @State private var scannedPairingCode = false
 
   init(wearables: WearablesInterface, wearablesVM: WearablesViewModel) {
     self._viewModel = State(wrappedValue: CameraViewModel(wearables: wearables))
@@ -111,20 +116,74 @@ struct CameraView: View {
       Button("Reject", role: .cancel) { viewModel.resolveBroadcastConnection(allow: false) }
       Button("Allow") { viewModel.resolveBroadcastConnection(allow: true) }
     } message: {
-      Text("A device at \(viewModel.broadcastPeer) wants to view your camera. Approve within five seconds. Only allow a connection you initiated. Wi-Fi video is not encrypted.")
+      Text("A device at \(viewModel.broadcastPeer) wants to view your camera. Approve within 30 seconds. Video is sent only after you allow it. Only allow a connection you initiated.")
     }
-    .sheet(isPresented: $showBroadcast) {
+    .sheet(isPresented: $showBroadcast, onDismiss: {
+      if viewModel.isPairing { viewModel.cancelPairing() }
+    }) {
       NavigationStack {
         Form {
           Section("Mac camera") {
-            Text("Open TetherCam on your Mac. USB connects automatically. For Wi-Fi, launch TetherCam with --debug-tcp and one of the addresses below. This connection has no password or encryption; only use it on a trusted network. Keep this app in the foreground.")
-            Toggle("Allow unencrypted Wi-Fi connections", isOn: $viewModel.broadcastWiFiEnabled)
+            Label("GlassesData", systemImage: "video.badge.waveform")
+              .font(.headline)
+            Text("USB connects automatically. Pair your Mac once to use encrypted Wi-Fi. Keep this app in the foreground.")
+            Button(viewModel.isPairing ? "Cancel pairing" : "Pair a Mac") {
+              viewModel.isPairing ? viewModel.cancelPairing() : viewModel.beginPairing()
+            }.disabled(viewModel.isBroadcasting)
+            if let status = viewModel.pairingStatus { Text(status).font(.caption).foregroundStyle(.secondary) }
+            Button("Forget paired Mac", role: .destructive) { viewModel.forgetPairing() }
+              .disabled(viewModel.isBroadcasting || viewModel.isPairing)
+            Toggle("Use encrypted Wi-Fi", isOn: $viewModel.broadcastWiFiEnabled)
               .disabled(viewModel.isBroadcasting)
             Button(viewModel.isBroadcasting ? "Stop broadcast" : "Start broadcast") { viewModel.toggleBroadcast() }
-              .disabled(!viewModel.isBroadcasting && !viewModel.isStreaming)
+              .disabled(viewModel.isPairing || (!viewModel.isBroadcasting && !viewModel.isStreaming))
+            if let key = viewModel.broadcastPairingKey {
+              Text("Pairing key (keep private)").font(.caption)
+              Text(key).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+            }
             if let status = viewModel.broadcastStatus {
               Text(status).textSelection(.enabled)
               if status.contains(":7878") { ShareLink(item: status) }
+            }
+          }
+        }
+        .sheet(isPresented: $viewModel.showPairingCode) {
+          NavigationStack {
+            Form {
+              Section("Pair with Mac") {
+                Text("Enter the six-digit code shown on your Mac, or scan its QR code.")
+                TextField("Six-digit code", text: $viewModel.pairingCodeInput).keyboardType(.numberPad)
+                Button("Scan pairing QR code") {
+                  Task {
+                    guard DataScannerViewController.isSupported else { pairingScanError = "Scanning is unavailable on this device."; return }
+                    let authorized = await AVCaptureDevice.requestAccess(for: .video)
+                    guard authorized, DataScannerViewController.isAvailable else { pairingScanError = "Camera access is required to scan. You can enter the code instead."; return }
+                    showPairingScanner = true
+                  }
+                }
+                if let pairingScanError { Text(pairingScanError).foregroundStyle(.secondary) }
+                Button("Pair") { viewModel.confirmPairingCode() }
+              }
+            }
+            .navigationTitle("Pair with Mac")
+            .interactiveDismissDisabled()
+            .toolbar { Button("Cancel") { viewModel.cancelPairing() } }
+            .sheet(isPresented: $showPairingScanner, onDismiss: {
+              if scannedPairingCode {
+                scannedPairingCode = false
+                viewModel.confirmPairingCode()
+              }
+            }) {
+              NavigationStack {
+                PairingScanner { code in
+                  viewModel.pairingCodeInput = code
+                  scannedPairingCode = true
+                  showPairingScanner = false
+                }
+                .ignoresSafeArea(edges: .bottom)
+                .navigationTitle("Scan pairing code")
+                .toolbar { Button("Cancel") { showPairingScanner = false } }
+              }
             }
           }
         }
@@ -134,7 +193,7 @@ struct CameraView: View {
           Button("Reject", role: .cancel) { viewModel.resolveBroadcastConnection(allow: false) }
           Button("Allow") { viewModel.resolveBroadcastConnection(allow: true) }
         } message: {
-          Text("A device at \(viewModel.broadcastPeer) wants to view your camera. Approve within five seconds. Only allow a connection you initiated. Wi-Fi video is not encrypted.")
+          Text("A device at \(viewModel.broadcastPeer) wants to view your camera. Approve within 30 seconds. Video is sent only after you allow it. Only allow a connection you initiated.")
         }
       }
     }
@@ -329,7 +388,7 @@ struct CameraView: View {
     }
     .frame(maxWidth: .infinity)
     .padding(.horizontal, 24)
-    .padding(.top, 48)
+    .padding(.top, 20)
     .padding(.bottom, 28)
     .background(
       LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)

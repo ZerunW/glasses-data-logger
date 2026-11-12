@@ -6,10 +6,13 @@ import MWDATMotion
 struct SensorPanelView: View {
   @Bindable var sensorManager: SensorManager
   let isRecording: Bool
-  @State private var expanded = false
 
   var body: some View {
-    DisclosureGroup("Sensor Panel", isExpanded: $expanded) {
+    VStack(alignment: .leading, spacing: 8) {
+      Text("Sensor Panel")
+        .font(.headline)
+        .foregroundStyle(.primary)
+
       ScrollView {
         VStack(alignment: .leading, spacing: 12) {
           Picker("Sampling rate", selection: $sensorManager.samplingRateHz) {
@@ -30,7 +33,8 @@ struct SensorPanelView: View {
             Text("Worn: \(state.donState) · Hinge: \(state.hingeState) · Thermal: \(state.thermalLevel)")
           } else { Text("Device status: None") }
         }.font(.caption).frame(maxWidth: .infinity, alignment: .leading)
-      }.frame(maxHeight: 280)
+      }
+      .frame(maxHeight: 280)
     }
     .padding(10)
     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))

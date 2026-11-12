@@ -16,9 +16,20 @@ DerivedData/
 .env
 .env.*
 *.mobileprovision
+*.provisionprofile
+*.ipa
 *.p12
+*.pfx
 *.p8
 *.pem
 *.key
 *.xcarchive
 Recordings/
+
+# Local Mac app build
+MacRelay/build/
+dist/
+
+# Python test caches
+__pycache__/
+*.pyc

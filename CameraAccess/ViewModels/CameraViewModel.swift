@@ -172,9 +172,64 @@ final class CameraViewModel {
   @ObservationIgnored private var isStoppingForBackground: Bool = false
   @ObservationIgnored private var backgroundStopSuppressionTask: Task<Void, Never>?
 
+  var pairingStatus: String?
+  var showPairingCode = false
+  var isPairing = false
+  var pairingCodeInput = ""
+  @ObservationIgnored private let pairingHost = PairingHost()
+
+  func beginPairing() {
+    guard !isBroadcasting, !isPairing else { return }
+    isPairing = true
+    pairingStatus = "Waiting for a Mac…"
+    pairingHost.start { [weak self] event in
+      Task { @MainActor in
+        guard let self, self.isPairing else { return }
+        switch event {
+        case .ready: self.pairingStatus = "Select this iPhone in GlassesData on your Mac."
+        case .request:
+          self.pairingCodeInput = ""
+          self.showPairingCode = true
+          self.pairingStatus = "Enter the code shown on your Mac."
+        case .paired(let key):
+          do {
+            try PairingTrustStore.save(key)
+            self.pairingStatus = "Paired. Start encrypted Wi-Fi broadcasting."
+          } catch { self.pairingStatus = "Could not save pairing securely." }
+          self.isPairing = false
+          self.showPairingCode = false
+        case .failed(let message):
+          self.pairingStatus = message
+          self.isPairing = false
+          self.showPairingCode = false
+        }
+      }
+    }
+  }
+
+  func confirmPairingCode() {
+    showPairingCode = false
+    pairingHost.confirm(pairingCodeInput)
+    pairingCodeInput = ""
+  }
+
+  func cancelPairing() {
+    pairingHost.stop()
+    isPairing = false
+    showPairingCode = false
+    pairingCodeInput = ""
+    pairingStatus = "Pairing cancelled."
+  }
+
+  func forgetPairing() {
+    do { try PairingTrustStore.remove(); pairingStatus = "Pairing removed." }
+    catch { pairingStatus = "Could not remove pairing." }
+  }
+
   var broadcastStatus: String?
   var isBroadcasting = false
   var broadcastWiFiEnabled = false
+  var broadcastPairingKey: String?
   var showBroadcastApproval = false
   var broadcastPeer = ""
   private var broadcastApprovalID: UUID?
@@ -185,17 +240,25 @@ final class CameraViewModel {
       stopBroadcast()
     } else {
       guard isStreaming else { return }
+      let key: Data?
+      do {
+        if broadcastWiFiEnabled { key = try PairingTrustStore.load() ?? SecureTransport.makeKey() }
+        else { key = nil }
+      }
+      catch { broadcastStatus = "Could not generate a secure pairing key."; return }
+      broadcastPairingKey = (try? PairingTrustStore.load()) == nil ? key.map(SecureTransport.hex) : nil
       isBroadcasting = true
       broadcastStatus = "Starting…"
-      broadcast.start(allowWiFi: broadcastWiFiEnabled, onStatus: { [weak self] status in
+      broadcast.start(allowWiFi: broadcastWiFiEnabled, key: key, onStatus: { [weak self] status in
         Task { @MainActor in
           guard let self, self.isBroadcasting else { return }
           self.broadcastStatus = status
           if status.hasPrefix("Broadcast failed:") {
             self.isBroadcasting = false
             self.broadcastWiFiEnabled = false
+            self.broadcastPairingKey = nil
           }
-          if status == "Connection approval timed out." || status.hasPrefix("Disconnected.") {
+          if status.hasPrefix("Connection approval timed out.") || status.hasPrefix("Disconnected.") {
             self.showBroadcastApproval = false
             self.broadcastApprovalID = nil
           }
@@ -212,11 +275,13 @@ final class CameraViewModel {
   }
 
   private func stopBroadcast() {
+    if isPairing { cancelPairing() }
     broadcast.stop()
     showBroadcastApproval = false
     broadcastApprovalID = nil
     isBroadcasting = false
     broadcastWiFiEnabled = false
+    broadcastPairingKey = nil
     broadcastStatus = nil
   }
 
@@ -260,6 +325,7 @@ final class CameraViewModel {
     backgroundStopSuppressionTask?.cancel()
     recordingErrorTask?.cancel()
     broadcast.stop()
+    pairingHost.stop()
     deviceSession?.stop()
   }
 

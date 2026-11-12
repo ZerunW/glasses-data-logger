@@ -26,14 +26,16 @@ final class CameraBroadcast: @unchecked Sendable {
   }
   private let frameGate = OSAllocatedUnfairLock(initialState: FrameGate())
 
-  func start(allowWiFi: Bool, onStatus: @escaping @Sendable (String) -> Void, onApproval: @escaping @Sendable (UUID, String) -> Void) {
+  func start(allowWiFi: Bool, key: Data?, onStatus: @escaping @Sendable (String) -> Void, onApproval: @escaping @Sendable (UUID, String) -> Void) {
     queue.async { [self] in
       guard listener == nil else { return }
       status = onStatus
       approvalHandler = onApproval
       do {
-        let parameters = NWParameters.tcp
+        guard !allowWiFi || key != nil else { throw SecureTransport.KeyError.missingKey }
+        let parameters = allowWiFi ? SecureTransport.parameters(key: key!) : NWParameters.tcp
         parameters.allowLocalEndpointReuse = true
+        parameters.includePeerToPeer = allowWiFi
         if !allowWiFi {
           parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: 7878)
         }
@@ -41,13 +43,14 @@ final class CameraBroadcast: @unchecked Sendable {
         let listener = allowWiFi
           ? try NWListener(using: parameters, on: NWEndpoint.Port(rawValue: 7878)!)
           : try NWListener(using: parameters)
+        if allowWiFi { listener.service = NWListener.Service(name: "GlassesData", type: "_glassesdata._tcp") }
         self.listener = listener
         listener.stateUpdateHandler = { [weak self, weak listener] state in
           guard let self, let listener, self.listener === listener else { return }
           switch state {
           case .ready:
             let addresses = allowWiFi ? Self.localAddresses().map { "\($0):7878" }.joined(separator: "\n") : ""
-            onStatus(addresses.isEmpty ? "Ready for USB" : "Ready for USB. Wi-Fi addresses:\n\(addresses)")
+            onStatus(allowWiFi ? (addresses.isEmpty ? "Ready for nearby devices." : "Ready for nearby devices. Wi-Fi addresses:\n\(addresses)") : "Ready for USB")
           case .failed(let error):
             onStatus("Broadcast failed: \(error.localizedDescription)")
             self.stopOnQueue()
@@ -74,13 +77,29 @@ final class CameraBroadcast: @unchecked Sendable {
     guard listener != nil, client == nil else { connection.cancel(); return }
     client = connection
     approved = false
-    let approvalID = UUID()
-    pendingApproval = approvalID
     parser = IucmFrameParser()
     streaming = false; waitingForKeyframe = true; currentHVCC = nil; sending = false
     connection.stateUpdateHandler = { [weak self, weak connection] state in
       guard let self, let connection, self.client === connection else { return }
       switch state {
+      case .ready:
+        let approvalID = UUID()
+        self.pendingApproval = approvalID
+        self.lastReceivedNs = MonotonicClock.nowNanoseconds()
+        self.approvalHandler?(approvalID, String(describing: connection.endpoint))
+        // IUCM requires HELLO immediately after connection. The receiver can
+        // wait for the user's approval after it has completed its handshake;
+        // video remains gated by `approved` below.
+        self.sendControl(.hello(version: 0x0102, deviceName: "GlassesData", appVersion: "1.0", cameras: [CameraDescriptor(id: 0, position: .back, name: "Meta Glasses")]), to: connection)
+        self.receive(connection)
+        self.queue.asyncAfter(deadline: .now() + 30) { [weak self, weak connection] in
+          guard let self, let connection, self.client === connection, self.pendingApproval == approvalID else { return }
+          self.pendingApproval = nil; self.client = nil
+          self.streaming = false; self.approved = false; self.sending = false
+          self.wantsFrames.withLock { $0 = false }
+          connection.cancel()
+          self.status?("Connection approval timed out. No video was sent.")
+        }
       case .failed, .cancelled:
         self.client = nil; self.streaming = false; self.sending = false; self.pendingApproval = nil; self.approved = false
         self.wantsFrames.withLock { $0 = false }
@@ -89,14 +108,11 @@ final class CameraBroadcast: @unchecked Sendable {
       }
     }
     connection.start(queue: queue)
-    approvalHandler?(approvalID, String(describing: connection.endpoint))
-    // TetherCam reconnects if it does not receive HELLO within five seconds.
-    queue.asyncAfter(deadline: .now() + 4.5) { [weak self, weak connection] in
-      guard let self, let connection, self.client === connection, self.pendingApproval == approvalID else { return }
-      self.pendingApproval = nil
+    // Drop stalled TLS handshakes without prompting the user.
+    queue.asyncAfter(deadline: .now() + 8) { [weak self, weak connection] in
+      guard let self, let connection, self.client === connection, !self.approved, self.pendingApproval == nil else { return }
       self.client = nil
       connection.cancel()
-      self.status?("Connection approval timed out.")
     }
   }
 
@@ -106,14 +122,19 @@ final class CameraBroadcast: @unchecked Sendable {
       pendingApproval = nil
       guard allow else {
         client = nil
+        streaming = false; approved = false; sending = false
+        waitingForKeyframe = true; currentHVCC = nil
+        wantsFrames.withLock { $0 = false }
         connection.cancel()
         status?("Connection rejected.")
         return
       }
       approved = true
       lastReceivedNs = MonotonicClock.nowNanoseconds()
-      sendControl(.hello(version: 0x0102, deviceName: "GlassesData", appVersion: "1.0", cameras: [CameraDescriptor(id: 0, position: .back, name: "Meta Glasses")]), to: connection)
-      receive(connection)
+      currentHVCC = nil
+      waitingForKeyframe = true
+      wantsFrames.withLock { $0 = streaming }
+      status?(streaming ? "Connection approved. Starting video." : "Connection approved. Waiting for TetherCam to request video.")
       checkActivity(connection)
     }
   }
@@ -138,7 +159,10 @@ final class CameraBroadcast: @unchecked Sendable {
       guard let self, let connection, self.client === connection else { return }
       guard error == nil, !complete, let data, !data.isEmpty else {
         connection.cancel(); self.client = nil; self.streaming = false
-        self.wantsFrames.withLock { $0 = false }; return
+        self.pendingApproval = nil; self.approved = false
+        self.wantsFrames.withLock { $0 = false }
+        self.status?("Disconnected. Waiting for TetherCam on port 7878.")
+        return
       }
       self.lastReceivedNs = MonotonicClock.nowNanoseconds()
       do {
@@ -146,8 +170,10 @@ final class CameraBroadcast: @unchecked Sendable {
           switch message {
           case .start:
             self.streaming = true; self.waitingForKeyframe = true; self.currentHVCC = nil
+            // A CONFIG contains format metadata only. Send it while approval is
+            // pending so TetherCam's five-second CONFIG timeout does not expire.
             self.wantsFrames.withLock { $0 = true }
-            self.status?("TetherCam connected. Waiting for a camera keyframe.")
+            self.status?(self.approved ? "TetherCam connected. Waiting for a camera keyframe." : "TetherCam is ready. Approve on iPhone to start video.")
           case .stop:
             self.streaming = false; self.waitingForKeyframe = true
             self.wantsFrames.withLock { $0 = false }
@@ -157,7 +183,10 @@ final class CameraBroadcast: @unchecked Sendable {
         }
       } catch {
         connection.cancel(); self.client = nil; self.streaming = false
-        self.wantsFrames.withLock { $0 = false }; return
+        self.pendingApproval = nil; self.approved = false
+        self.wantsFrames.withLock { $0 = false }
+        self.status?("Disconnected. Invalid receiver message.")
+        return
       }
       self.receive(connection)
     }
@@ -203,7 +232,15 @@ final class CameraBroadcast: @unchecked Sendable {
     let pts = UInt64(time * 1_000_000)
     queue.async { [self] in
       defer { frameGate.withLock { $0.busy = false } }
-      guard let client, approved, streaming else { return }
+      guard let client, streaming else { return }
+      if !approved {
+        if currentHVCC != hvcc, keyframe, dimensions.width > 0, dimensions.height > 0,
+          dimensions.width <= UInt16.max, dimensions.height <= UInt16.max {
+          currentHVCC = hvcc
+          sendControl(.config(width: UInt16(dimensions.width), height: UInt16(dimensions.height), fps: 24, hvcC: hvcc), to: client)
+        }
+        return
+      }
       if admission.1 { waitingForKeyframe = true }
       if sending { waitingForKeyframe = true; return }
       if currentHVCC != hvcc { waitingForKeyframe = true }
@@ -221,7 +258,9 @@ final class CameraBroadcast: @unchecked Sendable {
         self.sending = false
         if error != nil {
           client.cancel(); self.client = nil; self.streaming = false
+          self.pendingApproval = nil; self.approved = false
           self.wantsFrames.withLock { $0 = false }
+          self.status?("Disconnected. Video transmission failed.")
         }
       })
     }

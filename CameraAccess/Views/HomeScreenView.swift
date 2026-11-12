@@ -21,7 +21,7 @@ struct HomeScreenView: View {
 
   var body: some View {
     ZStack {
-      Color.white.edgesIgnoringSafeArea(.all)
+      Color(uiColor: .systemBackground).edgesIgnoringSafeArea(.all)
 
       VStack(spacing: 12) {
         Spacer()
@@ -54,7 +54,7 @@ struct HomeScreenView: View {
         VStack(spacing: 20) {
           Text("You'll be redirected to the Meta AI app to confirm your connection.")
             .font(.system(size: 14))
-            .foregroundStyle(.gray)
+            .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 12)
