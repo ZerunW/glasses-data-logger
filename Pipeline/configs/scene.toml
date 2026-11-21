@@ -1,0 +1,18 @@
+# Step "scene": camera_traj + hands_world + arms + objects -> derived/sim/scene.xml (+ sim/assets/),
+# sim/scene.json, the kinematic replay sim/replay.mp4 and sim/replay_sheet.png (PIPELINE.md section 5).
+[scene]
+timestep = 0.002             # MuJoCo physics timestep, seconds
+integrator = "implicitfast"  # MuJoCo integrator (Euler, RK4, implicit, implicitfast)
+cone = "elliptic"            # friction cone; elliptic suits grasping (the Menagerie hands use it)
+impratio = 10.0              # frictional-to-normal impedance ratio (Menagerie Shadow Hand: 10)
+table_height_m = 0.75        # table top above the floor (the floor is not observed); floor = top - this
+floor_below_camera_m = 1.45  # without a table: floor this far below the first camera centre
+default_density = 500.0      # kg/m^3 when props.json has no mass (from the collision volume)
+default_friction = 0.8       # sliding friction when props.json has none (torsional 0.005, rolling 1e-4)
+hand_radius_m = 0.008        # radius of the human joint spheres (fingertips 0.006)
+replay = "auto"              # "auto" (MuJoCo when installed, else the numpy wireframe), "mujoco", "wireframe", "none"
+replay_height = 640          # pixel height of each half of replay.mp4 (= the sim render height)
+replay_max_frames = 0        # 0 = every video frame; otherwise this many evenly spaced frames
+replay_undistort = true      # undistort the video onto the sim camera's pinhole grid (halves line up)
+replay_crf = 20              # x264 quality of replay.mp4 (lower = better, bigger)
+replay_sheet_frames = 6      # frames in sim/replay_sheet.png

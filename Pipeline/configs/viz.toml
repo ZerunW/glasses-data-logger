@@ -1,0 +1,12 @@
+# Step "viz": static matplotlib figures derived/viz/*.png (always) and the Rerun recording
+# derived/viz/episode.rrd (when rerun-sdk is installed), plus derived/viz/viz.json (PIPELINE.md section 5).
+# Open the recording with: python -m glassesdata_pipeline view REC
+[viz]
+figures = ["topview", "snapshots", "timelines", "overlay"]  # static figures to write
+ground_truth = true          # overlay gt/ (dashed) when the recording is synthetic
+rerun = "auto"               # "auto" (export when rerun-sdk is installed), "on" (fail without it), "off"
+rerun_video = "asset"        # "asset": AssetVideo + frame references (HEVC needs FFmpeg >= 5.1 for the native viewer); "jpeg"; "none"
+rerun_jpeg_stride = 1        # with rerun_video = "jpeg": log every n-th frame
+rerun_jpeg_quality = 80      # JPEG quality of those frames
+rerun_jpeg_height = 640      # downsample JPEG frames to at most this height (pixels)
+rerun_ground_truth = true    # also log gt/ (synthetic recordings) under world/gt

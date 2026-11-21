@@ -140,7 +140,7 @@ output has the same object under the key `"meta"`. `inputs` maps each input file
 | | `objects/<id>/collision/part_*.obj` | convex parts (convex hull when decomposition is unavailable) |
 | | `objects/<id>/poses.npz` | `T_world_obj[T,4,4]`, `valid[T]`, `fitness[T]`, `grasped[T,2]` |
 | | `objects/<id>/props.json` | `volume_m3, mass_kg, com[3], friction` |
-| | `objects/table.json` | `normal[3], offset, height_m, polygon[[x,y],...]` (world) |
+| | `objects/table.json` | world frame: `normal[3]` (unit, pointing up), `offset` with `normal·x + offset = 0`, `top_z` (world z of the top surface at the polygon centre), `floor_z` (world z of the floor or null), `height_m` (top above the floor), `height_source` (`"floor_plane"` or `"default"`), `polygon[[x,y],...]`, `found` |
 | `scene` | `sim/scene.xml` (+ `sim/assets/`) | MuJoCo MJCF: world, table, objects (free joints), mocap human hand skeleton |
 | | `sim/replay.mp4` | side-by-side source video / kinematic replay |
 | `retarget` | `retarget_<robot>.npz` | `qpos[T,nq]`, `joint_names`, `err_m[T]`, `robot` |

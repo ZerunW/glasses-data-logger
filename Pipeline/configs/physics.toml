@@ -1,0 +1,15 @@
+# Step "physics": scene.xml + retarget_<robot>.npz -> derived/physics.json (+ sim/physics_<robot>.xml,
+# sim/physics_traj.npz). The robot hands follow the retargeted motion (base: mocap + soft weld; fingers:
+# the Menagerie position actuators), the objects are free; the simulated objects are compared with
+# objects/<id>/poses.npz (PIPELINE.md section 5). Needs mujoco; the robot/Menagerie come from [retarget].
+[physics]
+weld_solref = [0.02, 1.0]            # soft weld base_target -> hand base: time constant (s), damping ratio
+weld_solimp = [0.9, 0.95, 0.001, 0.5, 2.0]
+settle_s = 0.2                       # simulate this long at frame 0 before replaying (objects settle)
+max_frames = 0                       # 0 = whole episode; else only the first n frames
+pos_scale_m = 0.05                   # score: exp(-mean position deviation / this)
+rot_scale_deg = 30.0                 # score: exp(-mean rotation deviation / this)
+lift_threshold_m = 0.03              # the demo "lifts" an object when it rises this much while grasped
+lift_success_ratio = 0.5             # the sim lift succeeds when it reaches this fraction of the demo lift
+penetration_tol_m = 0.005            # robot-vs-world penetration tolerated without penalty
+penetration_scale_m = 0.01           # score: exp(-(max penetration - tol) / this)
