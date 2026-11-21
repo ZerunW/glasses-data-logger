@@ -13,7 +13,9 @@ Package: `Pipeline/glassesdata_pipeline/` (Python 3.11+). Command line: `python 
 - **Heavy** (run on the Ubuntu 24.04 + CUDA machine only): `torch`, `transformers`, `open3d`,
   `trimesh`, `coacd`, `mujoco`, `mujoco_warp`, `warp`, `mink`, `rerun`, `rsl_rl`, model weights.
   Import these lazily, inside the function or backend that needs them, never at module import.
-  When one is missing, raise `MissingDependency("pip install X (needed for step Y)")`.
+  When one is missing, raise `MissingDependency("pip install X (needed for step Y)")`. The runner
+  then reports the step as `skipped` and the steps that need its outputs as `blocked`; `run` still
+  exits 0, unless the step was named with `--steps` (then it counts as failed and `run` exits 1).
 - Tests that need a heavy package start with `pytest.importorskip("name")`.
 - Mac test command: `cd Pipeline && ~/.venvs/glassesdata-receiver/bin/python -m pytest tests -q -p no:cacheprovider`.
 - Nothing may be installed on the Mac. `Pipeline/requirements.txt` (full) and
@@ -48,20 +50,23 @@ Written by the receiver (`Receiver/glassesdata_receiver/recorder.py`):
 |---|---|
 | `video.mp4` | HEVC (`hvc1`), no B-frames, fragmented MP4, frames in order |
 | `frames.csv` | `frame_index, pts_us, phone_time_ns, mac_time_ns, keyframe, bytes` |
-| `motion.csv` | `phone_time_ns, glasses_time_ns, ax, ay, az, gx, gy, gz, mx, my, mz, qw, qx, qy, qz, source, mac_time_ns` (empty cells when the SDK gave no value; `source` is `glasses` or `phone`) |
+| `motion.csv` | `phone_time_ns, glasses_time_ns, ax, ay, az, gx, gy, gz, mx, my, mz, qw, qx, qy, qz, source, mac_time_ns` (empty cells when the SDK gave no value; `source` is the SDK's `MotionSource` name: `glasses` (the head IMU), `neuralBand` (the Meta Neural Band, a wrist IMU) or `unknown`. The current app never sends the phone's own IMU; `phone` only occurs in older recordings. `ingest` keeps the sources in `ingest.imu_sources`, by default only `glasses`; the `imu` step uses `glasses` rows as the head IMU, `phone` rows only with `imu.use_phone_imu`, `neuralBand` rows never) |
 | `inputs.csv` | `phone_time_ns, glasses_time_ms, source, type, detail, mac_time_ns` |
 | `device_state.csv` | `phone_time_ns, battery, charging, don, hinge, thermal, link, mac_time_ns` |
 | `clock.csv` | `mac_send_ns, mac_receive_ns, phone_time_ns, rtt_ns, offset_ns` |
 | `hands.csv` | live (frame-skipping) MediaPipe results; not used by the pipeline |
 | `info.json` | receiver metadata |
-| `calibration.json` | camera calibration in use when recording started (optional, see §3) |
+| `calibration.json` | camera calibration in use when recording started (optional, see §3; the receiver validates it first and leaves it out, with a note in `info.json`, when the stored file fails the check) |
 | `profile.json` | body measurements in use when recording started (optional, see §4) |
 | `pipeline.toml` | optional per-recording configuration overrides (§6) |
 | `gt/` | ground truth, synthetic recordings only (§8) |
 
-IMU units are not documented by the SDK. The `imu` step detects accelerometer units from the
-median norm at rest (≈1 → g, ≈9.8 → m/s²) and takes gyroscope units from config
-(`imu.gyro_units = "rad/s" | "deg/s" | "auto"`; auto compares with the visual rotation rate).
+IMU units: the Meta SDK documents the accelerometer in m/s², the gyroscope in rad/s and the
+magnetometer in µT (the magnetometer is not used). Not checked on the glasses yet, so the `imu`
+step checks the data instead of trusting that: by default (`imu.accel_units = "auto"`) it detects
+accelerometer units from the median norm at rest (≈9.8 → m/s², ≈1 → g; synthetic recordings write
+g), and `imu.gyro_units = "auto"` compares the gyroscope with the visual rotation rate (≈1 → rad/s,
+≈57 → deg/s); both can be fixed in the config.
 
 ## 3. `calibration.json` (shared with the receiver's calibration page)
 
@@ -125,7 +130,7 @@ output has the same object under the key `"meta"`. `inputs` maps each input file
 | `ingest` | `timeline.npz` | `frame_index[T]` int64, `pts_us[T]`, `phone_ns[T]` int64, `t[T]` float64, `keyframe[T]` bool, `imu_t[N]` (episode seconds), `acc[N,3]`, `gyro[N,3]`, `mag[N,3]`, `quat[N,4]`, `imu_is_glasses[N]` bool |
 | | `camera.json` | the calibration in use (§3) plus `"source"` |
 | | `profile.json` | the profile in use (§4) plus `bone_lengths_m[20]` |
-| `hands2d` | `hands2d.npz` | `kp[T,2,21,3]` (u, v, score), `hand_score[T,2]`, `mp_world[T,2,21,3]` (MediaPipe hand-centred metric landmarks, NaN if the backend has none) |
+| `hands2d` | `hands2d.npz` | `kp[T,2,21,3]` (u, v, score), `hand_score[T,2]`, `mp_world[T,2,21,3]` (MediaPipe hand-centred metric landmarks, NaN if the backend has none; frame: see under this table) |
 | `depth` | `depth/depth_f16.npy` | memmap float16 `[F,h,w]` metres, in the distorted image grid downsampled by `depth.downsample` |
 | | `depth/index.npz` | `frames[F]` (video frame indices that have depth), `scale` (= h / H) |
 | `hand3d` | `hand3d.npz` | `joints_cam[T,2,21,3]`, `valid[T,2]`, `reproj_px[T,2]`, `depth_scale[T]` (raw ratio hand-metric / depth-model, NaN when unknown), `depth_scale_smooth[T]` |
@@ -142,11 +147,59 @@ output has the same object under the key `"meta"`. `inputs` maps each input file
 | | `objects/<id>/props.json` | `volume_m3, mass_kg, com[3], friction` |
 | | `objects/table.json` | world frame: `normal[3]` (unit, pointing up), `offset` with `normal·x + offset = 0`, `top_z` (world z of the top surface at the polygon centre), `floor_z` (world z of the floor or null), `height_m` (top above the floor), `height_source` (`"floor_plane"` or `"default"`), `polygon[[x,y],...]`, `found` |
 | `scene` | `sim/scene.xml` (+ `sim/assets/`) | MuJoCo MJCF: world, table, objects (free joints), mocap human hand skeleton |
-| | `sim/replay.mp4` | side-by-side source video / kinematic replay |
-| `retarget` | `retarget_<robot>.npz` | `qpos[T,nq]`, `joint_names`, `err_m[T]`, `robot` |
+| | `sim/scene.json` | what the scene holds and the names in it (head body and camera, table, `obj_<id>` bodies and `obj_<id>_free` joints, `hand_<side>_<joint>` / `arm_<side>_<point>` mocap bodies), object mass properties and initial poses, the replay's renderer and frame count |
+| | `sim/replay.mp4` | side-by-side source video / kinematic replay (MuJoCo renderer, or a numpy wireframe without `mujoco`) |
+| | `sim/replay_sheet.png` | for a few frames (`scene.replay_sheet_frames`): the undistorted video with the sim overlaid, and the sim view alone |
+| `retarget` | `retarget_<robot>.npz` | `qpos[T,nq]`, `joint_names`, `err_m[T]`, `robot` (extras below) |
+| | `sim/robot_<robot>.xml` | the floating robot hands the `qpos` columns refer to (`mjcf.compose`, `base="free"`) |
 | `physics` | `physics.json` | per-object deviation of simulated vs reconstructed trajectory, plausibility score |
-| `viz` | `viz/episode.rrd`, `viz/*.png` | Rerun recording; static matplotlib figures |
-| `eval` (CLI command, not a runner step) | `eval.json`, `eval.md`, `eval/*.png` | metrics against `gt/` or against the ChArUco board |
+| | `sim/physics_<robot>.xml` | scene + robot hands, base driven by a mocap body and a soft weld |
+| | `sim/physics_traj.npz` | `T_world_obj[T,K,4,4]` (simulated), `object_ids[K]`, `penetration_m[T]`, `t[T]` |
+| `viz` | `viz/viz.json` | what was written (figures, Rerun file or why it was skipped); carries the runner's `meta` |
+| | `viz/{topview,snapshots,timelines,overlay}.png` | static matplotlib figures (`viz.figures`) |
+| | `viz/episode.rrd` | Rerun recording (only when `rerun-sdk` is installed and `viz.rerun` allows it) |
+| `eval` (CLI command, not a runner step) | `eval.json`, `eval.md`, `eval/*.png` | metrics against `gt/` (the ChArUco evaluation writes its own files, next row) |
+| `eval-charuco` (CLI command) | `eval_charuco.json`, `eval_charuco.md`, `eval_charuco.png` | depth and hand-derived scale against the on-screen ChArUco board (§9) |
+| `train` (CLI command) | `rl/<run>/` | TensorBoard events, checkpoints `model_<it>.pt`, `config.json`, `scene_<robot>_<side>.xml`, `scene_names.json`; `--play` adds `play/episode_<k>.mp4` and `play/metrics.json` (written, never run: needs torch, MuJoCo and rsl_rl) |
+
+**Frame of `hands2d.mp_world`.** Metres, origin near the hand centre (the `gt` backend uses the mean
+of joints 0, 5, 9, 13, 17), axes parallel to the image: x right, y down, z away from the camera.
+For the `gt` backend the axes are exactly the camera's. MediaPipe's world landmarks are only
+roughly image-aligned: their orientation is closer to a camera looking straight at the hand along
+its viewing ray, so `hand3d` tries both the camera-aligned and the ray-aligned orientation as
+starting poses.
+
+**Extra arrays and files.** Steps write more than the table above, for diagnostics and later
+steps. They are documented in each step module's docstring and may change without a change to
+this contract:
+
+- `timeline.npz`: `imu_source[N]` (the `motion.csv` source of each IMU row kept by
+  `ingest.imu_sources`); `profile.json` (derived): `defaulted` (the keys that took the default).
+- `hands2d.npz`: `slot_source[T,2]` int8 (mediapipe backend: how the slot was chosen, 0 none,
+  1 label, 2 temporal continuity, 3 handedness score); `joints_cam_model[T,2,21,3]` (wilor, hamer:
+  the model's own camera-frame 3D joints, metres, OpenCV axes, our focal length; not used by
+  `hand3d`).
+- `hand3d.npz`: `confidence[T,2]` (0..1), `shape_source[T,2]` int8 (0 none, 1 `mp_world`, 2 rest
+  pose), `shape_scale[T,2]` (factor applied to `mp_world`), `depth_scale_hand[T,2]` (per-hand
+  metric/model ratio), `flip_ambiguous[T,2]` (a second pose fitted almost as well),
+  `palm_obliquity_deg[T,2]` (palm normal vs line of sight; hands beyond
+  `hand3d.max_palm_obliquity_deg` give no depth scale and get no fusion), `depth_fused[T,2]` (the
+  depth fusion moved the hand).
+- `slam.npz`: `kf_of[T]` (keyframe a frame was tracked against, -1 none), `quality` (JSON string).
+- `imu.npz`: `accel_bias[3]` (IMU frame, m/s²), `gyro_scale` (raw gyro units → rad/s).
+- `camera_traj.npz`: `gravity_aligned` in its `meta`; `hands_world.npz`: `quality` (JSON string).
+- `arms.npz`: `torso_yaw[T]` (rad), `swivel[T,2]`, `cue_plane[T,2,4]`, `cue_conf[T,2]`, `quality`
+  (JSON string).
+- `retarget_<robot>.npz`: `joint_qposadr[njnt]`, `qpos_names[nq]` (per column; a free joint `j`
+  gives `j:px .. j:qz`, so columns map into any composed model by name), `err_m_hand[T,H]`,
+  `valid[T,H]`, `hands[H]`, `model_xml` (relative to `derived/`), `base_body`, `base_joints[H]`,
+  `palm_bodies[H]`, `finger_scale[H,5]`, `t[T]`, `fps`.
+- `objects/grasps.json` (detected and rejected grasp episodes, all prompts, objects that failed);
+  `objects/index.json` items also carry `prompts`, `grasps`, `mask_backend`, `mask_prompt_hits`,
+  `mesh_backend`, `collision_backend`; `props.json` also `density_kg_m3`, `inertia`, `extent_m`,
+  the backends and fusion details; `table.json` also `plane`, `n_inliers`, `rms_m`, `tilt_deg`,
+  `planes`. While an object is held, its pose is lifted so that it does not sink into the table
+  plane (`objects.tracking.no_table_penetration`).
 
 Depth maps are large: at `downsample = 4` a 720×1280 frame is 180×320 float16 (115 kB).
 Downsampled grid sizes are rounded (`geometry.downsample_size`); a resized camera follows OpenCV's
@@ -168,6 +221,9 @@ Backends are chosen per step, for example `hands2d.backend = "mediapipe" | "wilo
 `slam.backend = "builtin" | "import"` (with `slam.import_path` to a TUM-format trajectory from
 MegaSaM / DROID-SLAM / MASt3R-SLAM), `objects.mask_backend = "sam2" | "gt"`. The `gt` backends exist
 only for synthetic recordings: they read `gt/` and add the noise configured in `[synth.gt_noise]`.
+Note the direction of `backends.gt.depth_scale_truth(ep, cfg)`: it returns the true per-frame
+**model / metric** ratio of the `gt` depth (metric depth = backend depth / this value), the inverse
+of `hand3d.depth_scale` (metric / model). The evaluation inverts it before comparing.
 
 ## 7. Code layout and APIs
 
@@ -175,7 +231,8 @@ only for synthetic recordings: they read `gt/` and add the noise configured in `
 Pipeline/
   configs/<section>.toml   one file per config section (§6)
   requirements.txt, requirements-core.txt
-  scripts/setup_ubuntu.sh, scripts/omen_smoke.sh
+  scripts/setup_ubuntu.sh  one-time install on the Ubuntu 24.04 + NVIDIA laptop
+  scripts/omen_smoke.sh    first run there: tests, synthetic end to end, heavy steps, RL
   glassesdata_pipeline/
     __main__.py   CLI: run, synth, eval, eval-charuco, view, train, list-steps
     config.py     load/merge TOML, dotted access
@@ -186,9 +243,11 @@ Pipeline/
     errors.py     MissingDependency, PipelineError
     steps/        one module per step: ingest, hands2d, depth, hand3d, slam, imu, world, arms,
                   objects, scene, retarget, physics, viz
-    core/         pure algorithms, no file I/O (smoothing, elbow, imu_filter, align, scale, vo,
-                  pose_graph, icp, plane, fusion, ...)
-    backends/     model wrappers (mediapipe_hands, wilor, hamer, depth_anything, sam2, gt, ...)
+    core/         pure algorithms, no file I/O (smoothing, elbow, imu_filter, imu_calib, align,
+                  depth_scale, hand_pnp, forearm_cue, vo, pose_graph, icp, plane, fusion, grasp,
+                  hull, knn)
+    backends/     model wrappers (mediapipe_hands, wilor, hamer, depth_anything,
+                  video_depth_anything, sam2, image_to_3d, mesh_open3d, coacd, gt)
     synth/        synthetic recording generator
     eval/         metrics, report, charuco evaluation
     sim/          MJCF generation, kinematic replay, retargeting, physics check
@@ -214,23 +273,34 @@ gravity direction; `world` applies the gravity alignment and produces the final 
 
 ## 8. Synthetic recordings (`synth`)
 
-`python -m glassesdata_pipeline synth OUT_DIR [--seconds 8] [--seed 0] [--size 360x640]` writes a
-complete recording folder in the receiver's format (§2), rendered with numpy/OpenCV only (analytic
-ray casting against textured planes and boxes), plus `calibration.json` (`source: "synthetic"`),
-`profile.json`, a `pipeline.toml` that selects the `gt` backends where a learned model is needed,
-and `gt/`:
+`python -m glassesdata_pipeline synth OUT_DIR [--seconds 8] [--seed 0] [--size 360x640]
+[--draw-hands | --no-draw-hands] [--overwrite]` writes a complete recording folder in the
+receiver's format (§2), rendered with numpy/OpenCV only (analytic ray casting against textured
+planes and boxes), plus `calibration.json` (`source: "synthetic"`), `profile.json`, a
+`pipeline.toml` that selects the `gt` backends where a learned model is needed, and `gt/`:
 
 - `gt/gt.npz`: `T_world_cam[T,4,4]`, `K[3,3]`, `joints_world[T,2,21,3]`, `joints_cam[T,2,21,3]`,
   `visible[T,2,21]`, `shoulder_world[T,2,3]`, `elbow_world[T,2,3]`, `T_world_obj[T,K,4,4]`,
   `R_cam_imu[3,3]`, `imu_time_offset_s`, `gyro_bias[3]`, `accel_bias[3]`, `table_height_m`,
-  `object_sizes[K,3]`
+  `object_sizes[K,3]`; extras (not part of the contract) include `t`, `dist`, `floor_z`,
+  `table_top_z`, `table_polygon`, `grasped`, `object_ids`, `imu_t` and the true IMU signals
 - `gt/depth_f16.npy`: `[T,h,w]` float16 metres at full synthetic resolution
 - `gt/masks.npz`: per-object packed masks at full resolution, `frames`, `shape`
 
 Content: a textured room, a table, one or two textured boxes, a head-like camera path looking at
-the table, one right hand (21 joints from the profile's bone lengths, not rendered in the image)
-that reaches, grasps, lifts, moves and places a box, the matching shoulder/elbow, and IMU at 60 Hz
-with noise, bias, a known camera–IMU rotation and a known time offset.
+the table, a right hand (21 joints from the profile's bone lengths) that reaches, grasps, lifts,
+moves and places a box, a left hand resting near the table edge, the matching shoulders/elbows,
+and IMU at 60 Hz with noise, bias, a known camera–IMU rotation and a known time offset (see
+`synth/motion.py`). Hands and arms are painted as capsules by default (`synth.draw_hands = true`),
+so they appear in the video and in `gt/depth_f16.npy`, as a real depth model sees them; `hand3d`
+needs that for its depth scale. `--no-draw-hands` leaves them out: the depth map at a hand's
+pixels then shows the scene behind the hand and the hand-derived depth scale (and everything
+metric after it) is biased, so use it only for tests that do not depend on metric scale.
+
+The `pipeline.toml` also sets `depth.downsample` so that the depth grid is about
+`synth.depth_width_px` (180) pixels wide, the angular resolution the real glasses' 720 px frames
+get at the default `downsample = 4` (2 for the default 360×640 clip; `depth_width_px = 0` keeps the
+configured default).
 
 ## 9. Evaluation
 

@@ -1,191 +1,275 @@
 # GlassesData
 
-GlassesData extends Meta's CameraAccess sample with motion and input capture, live device status, and recording archives. It uses Meta Wearables DAT SDK **1.0.1**. The original camera connection, preview, photo capture, HFP microphone recording, playback, and sharing flows are available.
+Record first-person demonstrations with Ray-Ban Meta glasses (one RGB camera and an IMU), turn
+them into metric hand and arm skeletons, a head trajectory and object models in a gravity-aligned
+world, rebuild the scene in MuJoCo and train a robot-hand policy there with RL, in the style of
+EgoEngine. Three parts: an iPhone app that forwards the glasses' data, a Python receiver that
+records it on a computer, and an offline pipeline.
 
-## Set up Xcode and sign with a free Apple Account
+**Status:** everything is written; the app is tested on the iOS simulator with a mock device, the
+receiver and the pipeline's core on synthetic data on a Mac. **Nothing has run with the real
+glasses, the real iPhone, Ubuntu or a GPU yet.** See
+[Status](#status) and [First real test](#first-real-test).
 
-1. Install **Xcode 26.4 or later** with Swift 6.3 or later. In Xcode Settings → Locations, select that Xcode installation under Command Line Tools. Building for iOS requires the full Xcode installation.
-2. Open `GlassesData.xcodeproj` and wait for Swift Package Manager to resolve Meta SDK **1.0.1**. Select the **GlassesData** scheme.
-3. Sign in under Xcode Settings → Accounts. Copy `Config/Signing.local.xcconfig.example` to `Config/Signing.local.xcconfig`, then set `DEVELOPMENT_TEAM` to your Personal Team ID and replace the three bundle identifiers with unique values such as `com.yourname.glassesdata`. Git ignores this file, so your team ID and bundle identifiers stay out of commits. All three targets use automatic signing and read these values, so tests can also run on a device.
-4. Change the team and bundle identifiers only in `Config/Signing.local.xcconfig`. Leave the **Team** and **Bundle Identifier** fields in Xcode's General and **Signing & Capabilities** panes unchanged: editing them writes literal values into `project.pbxproj`, which is committed. Before committing, check `git diff GlassesData.xcodeproj/project.pbxproj` for a `DEVELOPMENT_TEAM` value, a `DevelopmentTeam` entry under `TargetAttributes`, or a literal `PRODUCT_BUNDLE_IDENTIFIER`, and remove any you find. Without a local file, the project uses the `com.example` defaults in `Config/Signing.xcconfig` with no team; unsigned and simulator builds work, but running on a device requires the local file.
-5. Connect your iPhone over USB, unlock it, and approve the trust prompt. Enable **Developer Mode** under Settings → Privacy & Security and follow the restart prompts. Select the iPhone as the Xcode run destination and press **⌘R**. If iOS asks you to trust the developer, go to Settings → General → VPN & Device Management.
-6. Apple limits the lifetime of free provisioning profiles and the number of devices and apps you can provision. Run the app from Xcode again when the profile expires. Copy any recordings you want to keep before uninstalling the app, which deletes its Documents directory.
+## How it fits together
 
-### Personal Team capabilities
+```text
+Ray-Ban Meta glasses
+  │  Meta Wearables DAT SDK 1.0.1: HEVC 720×1280 at 24 fps (.high), IMU, inputs, device state
+  ▼
+iPhone app (CameraAccess/, SwiftUI)
+  │  optional copy on the iPhone ("Save on this iPhone", folder chosen in Files)
+  │  GDL1 protocol, one of:
+  │    USB   the app listens on 127.0.0.1:7900; the computer connects through usbmuxd
+  │          (no pairing, no encryption)
+  │    Wi-Fi the app connects to the computer: TLS 1.3, pinned certificate, token
+  │          (QR pairing gdpair://v1?..., Bonjour _glassesdata._tcp)
+  ▼
+Receiver (Receiver/, Python, macOS or Ubuntu 24.04)
+  │  web page on 127.0.0.1:8765: live video + hands, signal chain, Record, calibration,
+  │  body measurements; virtual camera (OBS on macOS, v4l2loopback on Linux)
+  │  recording folder: video.mp4 (original HEVC) + CSVs + calibration.json + profile.json + info.json
+  ▼
+Offline pipeline (Pipeline/; heavy steps on the Ubuntu + CUDA laptop)
+  │  ingest → hands2d → depth → hand3d → slam → imu → world → arms → objects
+  │         → scene → retarget → physics → viz            (all outputs in <recording>/derived/)
+  ▼
+train: PPO (rsl_rl) in MuJoCo / MuJoCo Warp, a Shadow Hand reproducing the demo's object motion
+```
 
-`CODE_SIGN_ENTITLEMENTS` points to `CameraAccess/PersonalTeam.entitlements` by default. This file includes Keychain Sharing. `Info.plist` declares the Bluetooth, External Accessory, and Audio background modes.
+## Repository layout
 
-Apple's free developer accounts support Background Modes and Keychain Sharing. The Personal Team configuration omits Hotspot and Access WiFi Information because these capabilities require a paid account. The original `CameraAccess/CameraAccess.entitlements` is included for reference. [Apple Account and Personal Team overview](https://developer.apple.com/help/account/basics/about-your-developer-account) · [Supported iOS capabilities](https://developer.apple.com/help/account/reference/supported-capabilities-ios)
+| Path | What |
+|---|---|
+| `CameraAccess/` | iPhone app (SwiftUI, Meta Wearables DAT SDK 1.0.1). `Streaming/`: GDL1 link, USB listener, Wi-Fi TLS client, pairing. `Recording/`: saving on the iPhone, folder choice |
+| `CameraAccessTests/`, `CameraAccessUITests/` | XCTest unit and UI tests (MockDeviceKit, `FakeReceiver`) |
+| `Config/` | `Signing.xcconfig` (shared defaults) and your gitignored `Signing.local.xcconfig` |
+| `GlassesData.xcodeproj` | Xcode project, scheme `GlassesData` |
+| `Receiver/` | Python receiver: `glassesdata_receiver/`, `tests/`, `tools/` (`fake_sender.py`, `swift_sender/`), `scripts/` (Ubuntu setup and check) |
+| `Pipeline/` | Offline pipeline: `glassesdata_pipeline/` (steps, core math, backends, sim, viz, rl, synth, eval), `configs/`, `tests/` |
+| `Docs/` | `PIPELINE.md` (the pipeline's data contract), `SECURITY_REVIEW.md`, `VALIDATION.md`, `CameraAccess-original-README.md` |
 
-Test the data link with the Adventurer and its installed firmware. If the glasses require the app to establish a Wi-Fi link using either restricted capability, free provisioning may prevent that link from working.
+Component documentation: [Receiver/README.md](Receiver/README.md) (long and complete: web page,
+endpoints, recording format, clocks, calibration, virtual camera, Ubuntu) and
+[Pipeline/README.md](Pipeline/README.md) with the contract in [Docs/PIPELINE.md](Docs/PIPELINE.md).
+The iPhone app is documented in this file.
+
+## Status
+
+| Part | Written | Verified how | Not verified |
+|---|---|---|---|
+| iPhone app: link (USB, Wi-Fi), split screen with cards, Record controls the computer, Save on this iPhone, record-priority buffering | yes | 78 unit + 20 UI tests pass on a signed simulator with a mock device and a fake receiver (three consecutive full runs) | real iPhone and glasses; Files-picker folders in iCloud Drive and on USB drives |
+| GDL1 protocol | yes | the same byte fixtures in the Swift and Python tests; the app's own link code (`tools/swift_sender`) against the receiver over TCP and pinned TLS | over a real cable or network |
+| Receiver: recording, web page, live hands, Wi-Fi pairing | yes | 339 tests pass on macOS; `tools/fake_sender.py` | a real phone; MediaPipe on first-person footage |
+| Receiver: camera calibration, body measurements | yes | end-to-end test with synthetic ChArUco views over HTTP: intrinsics within 0.03 %, RMS 0.12 px; calibration files validated before use and before copying into recordings | the glasses' real camera |
+| Receiver: virtual camera | yes | unit tests | not yet seen in QuickTime/Zoom (automated read-back blocked by macOS camera permission) |
+| Receiver on Ubuntu 24.04, `setup_ubuntu.sh`, `check_linux.sh` | yes | Linux paths unit-tested with a simulated platform; scripts `bash -n` only | never run on Ubuntu |
+| Pipeline `ingest` … `arms`, `scene`, static `viz`, `eval`, `eval-charuco` | yes | 308 tests pass, 10 skipped (heavy packages); whole chain on synthetic recordings, three seeds ([VALIDATION.md](Docs/VALIDATION.md)) | real recordings |
+| `hands2d` MediaPipe backend | yes | tests | first-person footage |
+| Learned backends: WiLoR, HaMeR, Depth Anything V2, Video Depth Anything, SAM 2, SAM 3D Objects | written | never run | everything (needs CUDA) |
+| `objects` (table, unknown objects, poses, grasps) | yes | tests with fabricated inputs; whole synthetic chain with gt masks: object position about 1 cm | SAM 2 masks, real scenes |
+| `retarget` (mink, Shadow Hand), `physics`, Rerun export | written | numpy parts tested; on the Mac the run reports them as skipped | MuJoCo, mink, Rerun never imported |
+| RL `train` (MuJoCo / MuJoCo Warp, rsl_rl PPO) | written | task math, observations, rewards, reference tested with numpy | never run: torch, MuJoCo, MuJoCo Warp, rsl_rl |
+| `Pipeline/scripts/setup_ubuntu.sh`, `omen_smoke.sh` | yes | `bash -n` only | never run on the laptop |
+
+## Quick starts
+
+### 1. iPhone app: build, sign, install
+
+Needs a Mac with Xcode 26.4 or later (last built with Xcode 27.2), an iPhone on iOS 17.2 or later,
+the glasses paired in the Meta AI app, and an Apple Account (a free one is enough).
+
+1. Open `GlassesData.xcodeproj` and let Swift Package Manager resolve `meta-wearables-dat-ios` 1.0.1.
+2. Signing, kept out of git:
+
+   ```sh
+   cp Config/Signing.local.xcconfig.example Config/Signing.local.xcconfig
+   ```
+
+   Set `DEVELOPMENT_TEAM` to your team ID (Xcode Settings > Accounts) and the three
+   `GD_*_BUNDLE_ID` values to identifiers of your own, such as `com.yourname.glassesdata`. Do not
+   set the team or bundle ID in Xcode's Signing & Capabilities pane: that writes them into
+   `project.pbxproj`. Before committing, check `git diff GlassesData.xcodeproj/project.pbxproj` for
+   a `DEVELOPMENT_TEAM`, a `DevelopmentTeam` or a literal `PRODUCT_BUNDLE_IDENTIFIER`.
+3. Connect the iPhone by cable, trust the Mac, enable Developer Mode (Settings > Privacy &
+   Security), select it as the run destination and press ⌘R. If iOS asks, trust the developer in
+   Settings > General > VPN & Device Management.
+4. A free Personal Team profile **expires after 7 days**: run from Xcode again. Uninstalling the
+   app deletes recordings kept in its own folder.
+5. Glasses: enable Developer Mode for them in the Meta AI app. The app runs in Meta's Developer
+   Mode (`MWDAT.MetaAppID = "0"` in `Info.plist`, no App ID or client token). Keep the `glassesdata`
+   URL scheme and `MWDAT.AppLinkURLScheme` in sync.
+6. In the app: **Connect my glasses** (confirm in Meta AI), **Start session**, **Preview**. The
+   screen is split: the video beside a column of live numbers, and swipeable cards under it
+   (Motion, Inputs, Glasses, Computer, Storage). **Computer** sets the link (Off, USB (default) or
+   Wi-Fi) and holds **Pair over Wi-Fi**. **Storage** holds **Save on this iPhone** (off by default)
+   and its folder. **Record** starts and stops the computer's recording while the link is connected
+   (and follows recordings started on the computer), and records on the iPhone too when Save on
+   this iPhone is on.
+
+Recordings on the iPhone go to `Documents/Recordings` (Files > On My iPhone > GlassesData) or to a
+folder picked in Files (written to a temporary folder first and moved there at the end). Each
+folder `YYYY-MM-DD_HHMMSS` holds `video.mov` (the glasses' HEVC, no re-encoding, plus the glasses
+microphone over Bluetooth HFP when the mic is on), `motion.csv`, `inputs.csv`,
+`device_state.csv` (the receiver's columns without `mac_time_ns`) and `info.json`.
+
+While the computer records, the phone buffers video through short Wi-Fi stalls (up to 64 MiB)
+instead of dropping it; otherwise it keeps latency low (2 MiB) and drops to the next keyframe.
+
+### 2. Receiver on macOS
+
+```sh
+cd Receiver
+python3.11 -m venv ~/.venvs/glassesdata-receiver        # outside OneDrive / iCloud Drive
+~/.venvs/glassesdata-receiver/bin/pip install -r requirements-dev.txt
+~/.venvs/glassesdata-receiver/bin/python -m glassesdata_receiver --usb --open
+```
+
+Plug in the iPhone, trust the computer, set the app's Computer link to USB. The page shows the
+video, the signal chain Glasses → iPhone → Computer → Decode → Hands, and the Record button.
+
+- **Wi-Fi:** `--wifi --pair` once, scan the code in the app (Computer > Pair over Wi-Fi); later
+  just `--wifi`. The code is a credential.
+- **Virtual camera:** `pip install pyvirtualcam`, install OBS and start its virtual camera once,
+  then `--virtual-camera` (or `V` on the page). Apps see "OBS Virtual Camera".
+- **Without a phone:** `python tools/fake_sender.py ../CameraAccess/TestResources/plant.mp4 --listen 7901 --loop`
+  and `python -m glassesdata_receiver --tcp 127.0.0.1:7901`.
+
+### 3. Receiver on Ubuntu 24.04 (the Omen laptop)
+
+Not run on Ubuntu yet; keep the scripts' output from the first run.
+
+```sh
+# the repository on the laptop, outside any synced folder (git clone or copy)
+Receiver/scripts/setup_ubuntu.sh      # apt packages, venv (Python 3.12), v4l2loopback, ufw; asks before each sudo step
+Receiver/scripts/check_linux.sh       # read-only diagnosis
+cd Receiver && ~/.venvs/glassesdata-receiver/bin/python -m glassesdata_receiver --usb --open
+```
+
+Unlock the iPhone and tap Trust once (or `idevicepair pair`). The virtual camera is `/dev/video10`
+labelled GlassesData. Details and troubleshooting: [Receiver/README.md](Receiver/README.md#ubuntu-2404).
+
+### 4. Calibration and body measurements
+
+Once per glasses and video resolution, with the glasses on and streaming, on the computer the
+receiver runs on:
+
+1. **Camera calibration > Calibrate.** Hold a bank card against the screen and match the outline
+   (this sets the board's real size); **Show the board**; look at it from different distances,
+   angles and parts of your view until 25 views are kept; **Solve**; check the undistorted
+   picture; **Save**. Save is refused when the solution fails a sanity check (fx / fy between
+   0.8 and 1.25, principal point inside the image, RMS at most 1.5 px) or views were kept after solving: solve again.
+2. **Body measurements > Edit measurements:** hand length, palm length, palm width, forearm, upper
+   arm, shoulder width in cm. Empty fields keep adult averages.
+
+Every new recording gets both (`calibration.json`, `profile.json`), checked first: a calibration
+file that fails the check is not copied, an implausible stored measurement falls back to its
+average, and `info.json` says why. Without a calibration the pipeline assumes a 65° horizontal
+field of view and no distortion.
+
+### 5. Record
+
+Press Record on the page (`R`), the Record button in the app, or start the receiver with
+`--record`. A recording is a folder `~/Movies/GlassesData/YYYY-MM-DD_HHMMSS/` (macOS) or
+`~/Videos/GlassesData/...` (Ubuntu) with `video.mp4` (the original HEVC), `frames.csv`,
+`motion.csv`, `inputs.csv`, `device_state.csv`, `clock.csv`, `hands.csv`, `calibration.json`,
+`profile.json` and `info.json` (format: [Receiver/README.md](Receiver/README.md#recordings)).
+If closing a recording fails (a full disk, say), `info.json` gets `closeError` and the page lists
+the recording as interrupted with the reason. Keep recordings out of this repository, which lives
+in OneDrive.
+
+### 6. Offline pipeline on the Omen
+
+Not run on the laptop yet: both scripts were written on the Mac and checked with `bash -n` only;
+keep their output from the first run.
+
+```sh
+# the repository on the laptop, outside any synced folder
+Pipeline/scripts/setup_ubuntu.sh            # Ubuntu packages, NVIDIA driver check, venv ~/.venvs/glassesdata-pipeline,
+                                            # torch (cu130 for driver >= 580, cu128 for 570-579; --cuda overrides),
+                                            # requirements, SAM 2, ~/src/mujoco_menagerie; --models downloads the
+                                            # weights; idempotent; asks before every sudo step
+export MUJOCO_GL=egl                        # MuJoCo renders off-screen on the GPU (add to ~/.bashrc)
+Pipeline/scripts/omen_smoke.sh [REC]        # first run: tests, synthetic end to end (gt, then Depth Anything V2
+                                            # and SAM 2), retarget/physics/Rerun, RL on MuJoCo CPU and Warp GPU,
+                                            # REC if given; logs + summary.txt in ~/glassesdata-smoke/<date>_<time>/
+```
+
+Then, for a recording `REC` (copied from the receiver's folder):
+
+```sh
+cd Pipeline
+PY=~/.venvs/glassesdata-pipeline/bin/python
+$PY -m glassesdata_pipeline list-steps REC          # steps and cache state
+$PY -m glassesdata_pipeline run REC                 # ingest … viz into REC/derived/ (cached; --force to redo)
+$PY -m glassesdata_pipeline eval-charuco REC_BOARD  # depth and hand-derived scale against the on-screen board
+$PY -m glassesdata_pipeline view REC                # Rerun viewer
+$PY -m glassesdata_pipeline train REC --backend mujoco --num-envs 32 --iterations 5   # CPU smoke test
+$PY -m glassesdata_pipeline train REC               # MuJoCo Warp, 4096 worlds, 2000 PPO iterations
+```
+
+`--set section.key=value` overrides any parameter in `Pipeline/configs/`. The Menagerie is
+expected at `~/src/mujoco_menagerie` (`retarget.menagerie_path`; `MUJOCO_MENAGERIE` is used when
+that path does not exist). WiLoR and
+HaMeR are optional hand backends (`setup_ubuntu.sh --with-wilor` / `--with-hamer`; both need
+`MANO_RIGHT.pkl`, which you download yourself after registering). More in
+[Pipeline/README.md](Pipeline/README.md).
+
+### 7. Synthetic demo on any machine
+
+No hardware and no GPU. Uses the core packages only (`Pipeline/requirements-core.txt`; on the
+development Mac use the receiver's environment, which has them).
+
+```sh
+cd Pipeline
+PY=~/.venvs/glassesdata-receiver/bin/python
+$PY -m glassesdata_pipeline synth /tmp/synth_demo --seconds 8   # recording + gt/, hands drawn
+$PY -m glassesdata_pipeline run /tmp/synth_demo                 # every step; exit 0
+$PY -m glassesdata_pipeline eval /tmp/synth_demo                # derived/eval.md
+```
+
+About a minute on the Mac. Without MuJoCo and mink, `run` reports `retarget` as skipped and
+`physics` as blocked, renders the scene replay as a wireframe and still exits 0 (it exits 1 if a
+step fails, or if a step you named with `--steps` cannot run). `synth --no-draw-hands` leaves the
+hands out of the image; the hand-derived depth scale is then biased (the depth map at the hands
+shows the table), so keep the default for anything metric.
+
+## First real test
+
+The shortest path from hardware to a first processed recording. The full plan with pass criteria
+is in [Docs/VALIDATION.md](Docs/VALIDATION.md#5-hardware-test-plan).
+
+- [ ] `Config/Signing.local.xcconfig` filled in; the app installs and launches on the iPhone.
+- [ ] Glasses in Developer Mode; **Connect my glasses**, **Start session**, **Preview**: video in
+      the app, Motion and Inputs cards update.
+- [ ] Receiver `--usb --open`, app link on USB: every hop of the signal chain near 24 fps, preview
+      under 0.5 s behind.
+- [ ] Write down what the code assumes: video size (720×1280?), accelerometer norm at rest
+      (9.8 → m/s²), gyroscope units, the motion `source` value, the IMU rate.
+- [ ] Camera calibration saved (note the RMS and field of view); body measurements entered.
+- [ ] 30 s recordings started from the page and from the app; the folder has every file and
+      `video.mp4` plays.
+- [ ] A recording of the on-screen board from 0.3 to 1 m with a hand in view, and a tabletop
+      demo: reach, grasp, lift, move and place a box.
+- [ ] On the Mac: `run REC --steps ingest,hands2d` finds the hands with the right sides.
+- [ ] Wi-Fi: pair, record, reconnect after a receiver restart.
+- [ ] Save on this iPhone: the app's folder, an iCloud Drive folder, a USB drive.
+- [ ] On the Omen: full `run` on both recordings, then `eval-charuco`: the hand-derived scale
+      should agree with the board's within a few percent before building further.
 
 ## Privacy and security
 
-Recordings include video, optional glasses microphone audio, motion samples, input events, and device status. They are stored in the app's Documents directory, visible through iPhone Files and Finder File Sharing, and may be included in the device's backups. Delete recordings you no longer need. Photos and videos shared with another app are subject to that app's handling.
-
-The app sets `MWDAT.CrashReporting.OptOut` to `true`, as supported by Meta SDK 1.0.1. This only opts out of the SDK crash-reporting feature; registration, camera permission flows, device connection, and other Meta SDK behavior may still exchange data. Refer to [Meta's developer documentation](https://wearables.developer.meta.com/docs/develop/) for its current practices.
-
-Camera streaming is disabled until started. USB mode binds the sender to iPhone loopback and requires approval for each connection. Wi-Fi must be enabled separately and resets on stop. Wi-Fi uses TLS and requires approval on the iPhone. Paired devices keep a device-local secret for reconnection; when no paired device exists, the app uses a temporary key displayed on the iPhone. TetherCam's third-party camera extension has a separate local sink policy and TetherCam's own update-check settings; consult its [privacy policy](https://tethercam.app/privacy).
-
-## Configure Meta Developer Mode
-
-- Enable Developer Mode for the glasses in the Meta AI app. Pair them with the iPhone, power them on, unfold them, and put them on.
-- `MWDAT.MetaAppID` in `Info.plist` is set to the string `0` for Developer Mode. This setup uses no Wearables Developer Center App ID or Client Token.
-- Keep the `glassesdata` URL scheme and the `glassesdata://` value of `MWDAT.AppLinkURLScheme` in sync. You can change the bundle identifier independently.
-- Xcode expands `MWDAT.TeamID` from `$(DEVELOPMENT_TEAM)`.
-- Motion and Inputs are experimental and require authorization. Access in Developer Mode still needs testing on the glasses. The panel displays an experimental feature authorization message for `InputsError.permissionDenied`. SDK 1.0.1 defines three `MotionError` cases: `sensorUnavailable`, `capabilityClosed`, and `deviceDisconnected`.
-
-## First run
-
-1. Tap **Connect**, complete registration in Meta AI, and return to GlassesData. Grant Bluetooth and local network access if prompted.
-2. Tap **Start session**. Motion and Inputs attach once the session reaches `.started`. The sensors are available independently of the camera preview.
-3. The **Sensor Panel** stays visible above the capture controls. Scroll inside it to view the charts, recent inputs, and device state. Choose 5, 10, 15, 24, 30, or 60 Hz. The default is **30 Hz**. Changing the rate reattaches Motion. The rate picker is disabled during recording.
-4. Tap **Preview**. For first use, follow the camera permission prompts in Meta AI and return to the app. Use the existing controls to take and share photos.
-5. Use the microphone button to enable the glasses' Bluetooth HFP microphone. The app records microphone audio only if permission is granted and the glasses' HFP input is available.
-6. Tap **Record** to capture video and sensor data together. Tap again to stop. After saving, you can play or share the video. Dismissing playback leaves the archive in place.
-7. If the app goes into the background, the session ends, or the glasses disconnect, the app stops the active recording, flushes the CSV buffers, and closes the files. Start a new session as needed. Wait for saving to finish before recording another clip.
-8. Find recordings in **Files → Browse → On My iPhone → GlassesData → Recordings**. You can also copy a recording folder with iPhone File Sharing in Finder.
-
-The panel shows the latest **10 seconds** of sensor history and **20 input events**. The chart and latest-value display update at up to 10 Hz to reduce UI overhead; the samples-per-second indicator counts all received samples. CSV logging includes every sample and event the app receives while recording. Missing components appear as unavailable in the panel and as empty CSV fields. Transport interruptions or full SDK buffers can cause samples to be lost before the app receives them.
-
-## Mac camera output with TetherCam
-
-GlassesData Mac includes the original signed TetherCam app as a bundled receiver. Its camera extension provides the system camera used by Zoom and other macOS apps. The iPhone only needs GlassesData; the TetherCam iPhone app is not used. The iPhone sender does not need a paid Apple Developer account.
-
-1. Move GlassesData Mac into Applications and open it. When macOS requests it, approve the TetherCam camera extension in System Settings → General → Login Items & Extensions → Camera Extensions. The TetherCam receiver is included inside GlassesData Mac and is started automatically. Activation from the bundled app on a Mac that has never installed the extension still requires validation.
-2. On the iPhone, start the glasses session and preview. Tap the **Mac camera** icon and start broadcasting. The sender defaults to a loopback-only TCP listener on port 7878 for USB. Each connection requires approval on the iPhone before video is sent. The sender completes the receiver handshake and sends codec format metadata while waiting up to 30 seconds for approval; no video frames are sent before you allow the connection. The sender stops when the preview or session ends.
-3. For USB, select **USB** in GlassesData Mac, connect the iPhone with a data cable, and trust the Mac when prompted. Start USB broadcasting on the iPhone and approve the connection. The bundled receiver connects through usbmuxd. It does not require an iPhone Personal Hotspot.
-4. For Wi-Fi, open **GlassesData Mac** and the iPhone camera preview. On the iPhone, open **Mac camera**, stop broadcasting if needed, and select **Pair a Mac**. On the Mac, select the nearby iPhone and choose **Pair with iPhone**. Scan the QR code shown on the Mac with the iPhone, or enter its six-digit code manually. Confirming the code saves a device-local pairing secret in each device's Keychain. The scanner needs camera access; manual entry is available if scanning fails.
-
-   Select **Encrypted Wi-Fi** on the Mac, then enable **Use encrypted Wi-Fi** on the iPhone and start broadcasting. The Mac app discovers the iPhone and attempts to connect automatically; approve each video connection on the iPhone. Stop broadcasting when finished. To revoke trust, choose **Forget paired Mac** on the iPhone and **Forget device** on the Mac. Pairing a new device replaces the stored device. GlassesData starts its bundled TetherCam receiver in headless mode when the Mac app opens and stops the receiver when the app quits. macOS manages the installed camera extension separately.
-
-   To build the Mac app from source with Xcode installed, obtain the original signed TetherCam Mac app from [TetherCam releases](https://github.com/Kanevry/tethercam/releases) and place it at `/Applications/TetherCam.app`, or point `TETHERCAM_APP` at it. Run `./MacRelay/build.sh` from this project folder. The build verifies the publisher's signature and embeds the original app unchanged. Open `MacRelay/build/GlassesData Mac.app`; you can then move it to Applications. This local GlassesData build is ad-hoc signed and is not notarized. The Mac app follows the system light or dark appearance, as do the iPhone's native panels.
-
-5. Select **TetherCam** as the camera in Zoom or another application. The source is the glasses stream, configured at 24 fps. TetherCam's camera may present a 30 fps output by repeating frames; that does not make the glasses capture 30 fps.
-
-The iPhone and Mac relay authenticate each other with a 256-bit random pre-shared key and use TLS 1.2 with AES-GCM. A paired device key persists in the local Keychain until forgotten; the unpaired fallback key is not persisted. This PSK cipher suite does not provide forward secrecy: disclosure of the persistent paired key could expose captured traffic from sessions that used that key. Enter the key privately and stop broadcasting when finished. TetherCam communicates with the relay over Mac loopback, not encrypted; another local process could connect to that port. The iPhone-to-Mac Wi-Fi segment remains protected by TLS. TetherCam's signed camera extension also has its own local sink authorization policy, which this project cannot change. The camera extension carries video only; local recording and optional HFP audio remain separate.
-
-The TetherCam compatibility layer includes MIT-licensed protocol code. See `CameraAccess/Streaming/TetherCam-LICENSE.txt`. The iOS app and test targets compile without signing. A local test passed actual HEVC from the bundled sample through the GlassesData sender to the unmodified TetherCam receiver and decoder. Real-glasses USB, encrypted Wi-Fi, format changes, latency, and Zoom use still need device testing.
-
-## Recording files and timestamps
-
-```text
-Documents/Recordings/2026-11-11_001512/
-  video.mov
-  motion.csv
-  inputs.csv
-  device_state.csv
-  info.json
-```
-
-Folders use the iPhone's local time. A numeric suffix prevents collisions when recordings start in the same second. If recording stops before the first video frame is written, or video writing fails, the folder may contain only the logs and metadata.
-
-All `phone_time_ns` values use the same iPhone monotonic clock, `mach_continuous_time` converted to nanoseconds. The `glasses_time_ns` and `glasses_time_ms` columns preserve the timestamps supplied by the SDK. Compute time differences within the same clock domain.
-
-Use the phone timestamp of the first successfully written video frame in `info.json` to align the video and CSV files approximately. Transport and scheduling delay affect this timestamp. The video uses the sample's HEVC timeline handling. Pauses and source timestamp resets, including mock feed loops, can affect alignment over longer recordings.
-
-## CSV fields
-
-Each UTF-8 CSV starts with a header row. Fields are comma separated and quoted as needed. Missing numeric values are empty.
-
-### motion.csv
-
-| Column | Meaning |
-|---|---|
-| `phone_time_ns` | iPhone monotonic timestamp when the app receives the sample, in nanoseconds |
-| `glasses_time_ns` | Original `MotionSample.timestampNs` from the device, in nanoseconds |
-| `ax`, `ay`, `az` | Acceleration along x, y, and z, in m/s² |
-| `gx`, `gy`, `gz` | Angular velocity about x, y, and z, in rad/s |
-| `mx`, `my`, `mz` | Magnetic field along x, y, and z, in µT |
-| `qw` | Scalar component of the orientation quaternion |
-| `qx`, `qy`, `qz` | x, y, and z components of the orientation quaternion |
-| `source` | `glasses`, `neuralBand`, or `unknown` |
-
-The file preserves SDK values, including acceleration with gravity, the original axes, and the original quaternion. The panel normalizes the quaternion and computes ZYX Euler angles in degrees: roll about x, pitch about y, and yaw about z. Verify the coordinate conventions and behavior near singular orientations on the hardware before using these values for orientation analysis.
-
-### inputs.csv
-
-| Column | Meaning |
-|---|---|
-| `phone_time_ns` | iPhone monotonic timestamp when the app receives the event, in nanoseconds |
-| `glasses_time_ms` | Original `InputEvent.timestampMs` from the device, in milliseconds |
-| `source` | `captouch`, `neuralBand`, `captureButton`, `actionButton`, `neuralBandDrag`, or `unknown` |
-| `type` | `nav`, `select`, `back`, `button`, `capture`, or `drag` |
-| `detail` | Direction for navigation, button type for button events, `shortPress` / `hold` / `doublePress` for capture events, or action and x/y/dx/dy for drag events. Empty for select and back events. |
-
-The app observes input events for display and logging. With `consumeBack=false`, the system handles Back. Physical interactions can still cause the system to pause or end a session.
-
-### device_state.csv
-
-The app logs the latest device state at the start of recording when available, then logs state changes.
-
-| Column | Meaning |
-|---|---|
-| `phone_time_ns` | iPhone monotonic timestamp of the state callback or initial snapshot, in nanoseconds |
-| `battery` | Battery percentage, empty when unavailable |
-| `charging` | SDK charging state |
-| `don` | SDK wearing state |
-| `hinge` | SDK hinge state |
-| `thermal` | SDK thermal severity level |
-| `link` | SDK connection state |
-
-`unknown` is an explicit SDK state. An empty field means the value was unavailable.
-
-### info.json
-
-- `startedAt` and `endedAt` record the start and stop triggers in ISO 8601. `startedPhoneTimeNs` and `endedPhoneTimeNs` record the corresponding iPhone monotonic timestamps. Video and sensor capture begin together once the archive folder is ready.
-- `samplingRateHz` is the requested Motion sampling rate. The panel's samples-per-second indicator counts received samples.
-- `configuredFrameRate` is the requested video frame rate. `videoNominalFrameRate` is the MOV track's nominal frame rate when available. `videoWidth` and `videoHeight` come from the first written frame.
-- `wroteHFPAudio` indicates whether HFP microphone samples were written.
-- `firstVideoFramePhoneTimeNs`, `firstVideoFramePTSSeconds`, and `firstVideoFrameSourcePTSSeconds` record the first written frame's iPhone timestamp, MOV presentation time, and source presentation time.
-
-Optional fields are omitted when unavailable.
-
-## Test with MockDeviceKit
-
-MockDeviceKit is not exposed in the app UI. It is enabled only for UI tests launched with the `--ui-testing` argument; the test harness can then control mock-device setup through the test server. The mock API can simulate device state, camera content, motion samples, and input events.
-
-Mock data is useful for checking the sensor panel and recording pipeline. Verify authorization, real IMU output, HFP audio, and the data link with physical glasses. A mock device has no glasses HFP microphone.
-
-## Build and run tests
-
-With full Xcode installed, run this command from the project directory:
-
-```bash
-xcodebuild -project GlassesData.xcodeproj -scheme GlassesData \
-  -destination 'generic/platform=iOS Simulator' \
-  -derivedDataPath /tmp/GlassesDataDerivedData CODE_SIGNING_ALLOWED=NO build
-```
-
-List installed simulators with `xcodebuild -showdestinations -project GlassesData.xcodeproj -scheme GlassesData`. To run the tests, use `-destination 'platform=iOS Simulator,id=SIMULATOR_ID' test` with a simulator ID from that list. The scheme runs tests serially because some CameraAccess tests share a MockDeviceKit singleton.
-
-An iOS device build and development signing have been verified. No iOS simulator runtime was available for the latest checks; see the [validation record](Docs/VALIDATION.md) for completed checks and remaining limitations.
-
-## Verify on physical hardware
-
-- Installation with a Personal Team profile and the Adventurer data link, including any Wi-Fi capability the glasses require.
-- Motion and Inputs authorization and firmware support with `MetaAppID=0`.
-- Delivered sample rate at each setting, missing fields, sensor axes, quaternion orientation, event sources, and capture gestures.
-- Stability, power use, temperature, and dropped samples while the camera, Motion, and Inputs run concurrently.
-- HFP routing, denied microphone permission, interruption recovery, and agreement between the audio track and `info.json`.
-- Playable MOV files and complete CSVs after backgrounding, locking, disconnecting, folding the glasses, ending the session, and making consecutive short recordings.
-- First frame alignment, drift over long recordings, changes to the system clock, and pause/resume behavior.
-- Archive visibility in Files, storage exhaustion errors, and the files available after a write failure.
-
-The app finalizes files during normal lifecycle transitions. Force quitting, abrupt system termination, or power loss can leave buffered rows and an unfinished MOV on disk.
+Recordings show everything the wearer looks at, including other people. The USB link has no
+authentication: any process on the computer can reach the app's port through usbmuxd while the
+app listens, so set the link to Off when not in use. Wi-Fi uses TLS 1.3 with a pinned
+certificate and a token. The receiver's page listens on 127.0.0.1 only unless told otherwise.
+Apart from Meta's SDK and the Meta AI app on the phone, no component sends data to a cloud or LLM
+service at runtime; the computer side only downloads model weights. Details and open issues:
+[Docs/SECURITY_REVIEW.md](Docs/SECURITY_REVIEW.md).
 
 ## Source and license
 
-Based on Meta's CameraAccess sample at commit `bbae597` (Release 1.0.1). The implementation was checked against the Swift interfaces distributed with the 1.0.1 XCFrameworks at commit `0bd369298eef6a980ad0bdb6c8a5502f2c02a08c`, the 1.0.0 changelog, and Meta's Motion, Inputs, session lifecycle, and DAT conventions guides.
-
-See the [original CameraAccess README](Docs/CameraAccess-original-README.md) and the [Meta license](LICENSE).
-
-## Local security checks
-
-Run `python3 SecurityTests/tls_integration.py` and `python3 SecurityTests/broadcast_approval.py` on macOS with Xcode command-line tools and an OpenSSL installation that supports TLS 1.2 PSK suites. These tests use public test fixtures and loopback traffic. They check successful TLS, incorrect-key and plaintext rejection, encrypted-record tampering, absence of a known test payload in captured traffic, and the broadcast server's approval behavior. They do not establish physical-device reliability or audit the entire app.
-
-Run `python3 SecurityTests/wireless_interop.py /path/to/tethercam` with a local TetherCam v0.4.0 source checkout to exercise the GlassesData sender and Mac relay over encrypted loopback with the TetherCam receiver and decoder. It delays approval for six seconds, checks that no decoded video arrives before approval, then requires at least ten decoded sample frames. The check does not exercise physical Wi-Fi, the camera extension, or real glasses.
-
-Run `python3 SecurityTests/wireless_wirecheck.py` to inspect the actual protocol messages through the synthetic encrypted relay and check that video frames are gated until approval.
-
-Short-code pairing uses ephemeral X25519 key agreement, a commitment exchange, and confirmation messages. The six-digit code must be transferred in person. Pairing accepts one attempt at a time and must be started explicitly on the iPhone. `python3 SecurityTests/pairing_protocol.py` tests matching codes, wrong codes, and altered commitments with local synthetic peers. This new pairing protocol and the camera scanner have not received independent security review or physical-device validation.
+The iPhone app is based on Meta's CameraAccess sample at commit `bbae597` (Release 1.0.1) and uses
+`facebook/meta-wearables-dat-ios` 1.0.1 at revision `0bd369298eef6a980ad0bdb6c8a5502f2c02a08c`.
+See the [original CameraAccess README](Docs/CameraAccess-original-README.md) and the
+[Meta license](LICENSE).
