@@ -50,6 +50,11 @@ def test_cli_list_run_eval_and_lazy(synth_recording, tmp_path, capsys):
     if importlib.util.find_spec("rsl_rl") is None:  # train is implemented (rl/); without rsl_rl it names the install
         assert main(["train", str(rec)]) == 1
         assert "rsl-rl-lib" in capsys.readouterr().err
+    for command in ("train", "view"):  # a leading option reaches the command's own parser
+        with pytest.raises(SystemExit) as exit_info:
+            main(["-q", command, "--help"])
+        assert exit_info.value.code == 0
+        assert "usage: python -m glassesdata_pipeline " + command in capsys.readouterr().out
     assert main(["eval-charuco", str(rec)]) == 1  # implemented; this recording has no board definition
     assert main(["run", str(rec), "--steps", "nope"]) == 1
 
@@ -59,4 +64,9 @@ def test_cli_synth(tmp_path):
     assert main(["synth", str(out), "--seconds", "1", "--size", "90x160", "--seed", "3"]) == 0
     info = json.loads((out / "info.json").read_text())
     assert info["synth"]["seed"] == 3 and info["framesWritten"] == 24
+    assert info["synth"]["draw_hands"] is True  # the default
+    assert "downsample = 1" in (out / "pipeline.toml").read_text()  # 90 px wide: depth at full size
+    flat = tmp_path / "flat"
+    assert main(["synth", str(flat), "--seconds", "0.2", "--size", "90x160", "--no-draw-hands"]) == 0
+    assert json.loads((flat / "info.json").read_text())["synth"]["draw_hands"] is False
     assert main(["synth", str(out), "--seconds", "1", "--size", "90x160"]) == 1  # not empty

@@ -4,8 +4,11 @@
 # Count the frames of video.mp4 by demuxing (no decoding). T = min(video frames, frames.csv rows);
 # a mismatch is logged. Set false to trust frames.csv (faster on very long recordings).
 count_video_frames = true
-# Keep motion.csv rows from these sources ("glasses", "phone"); imu_is_glasses marks the source.
-imu_sources = ["glasses", "phone"]
+# Keep motion.csv rows from these sources. The app writes the Meta SDK's MotionSource: "glasses"
+# (the head IMU in the frame), "neuralBand" (the Meta Neural Band: a WRIST IMU) and "unknown".
+# Only "glasses" rows are the head IMU (imu_is_glasses); other sources may be kept for inspection
+# (timeline.npz imu_source) but are never used as the head IMU by step "imu".
+imu_sources = ["glasses"]
 # Drop IMU rows whose phone_time_ns repeats the previous row of the same source.
 drop_duplicate_imu = true
 # Warn when consecutive glasses IMU samples are further apart than this (seconds).

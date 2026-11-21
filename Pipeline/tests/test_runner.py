@@ -6,15 +6,18 @@ import numpy as np
 import pytest
 
 from glassesdata_pipeline.episode import Episode
-from glassesdata_pipeline.errors import PipelineError
+from glassesdata_pipeline.errors import MissingDependency, PipelineError, require
 from glassesdata_pipeline.runner import Runner, Step, cache_status, discover
 
 
-def fake_step(name, calls, requires=(), inputs=(), outputs=None, version=1, fail=False, write=True, sections=None):
+def fake_step(name, calls, requires=(), inputs=(), outputs=None, version=1, fail=False, write=True, sections=None,
+              missing=None):
     def run(ep, cfg):
         calls.append(name)
         if fail:
             raise RuntimeError("boom")
+        if missing:
+            require(missing, missing, f"step {name}")
         if write:
             for out in outputs or [f"{name}.npz"]:
                 if out.endswith(".npz"):
@@ -148,6 +151,56 @@ def test_failures_block_dependents_only(rec):
     assert statuses(report) == {"a": "ran", "b": "failed", "c": "blocked", "d": "ran"}
     assert not report.ok
     assert "boom" in report.by_name()["b"].reason
+
+
+def test_missing_dependency_skips_and_blocks_dependents(rec):
+    calls = []
+    steps = chain(calls, b={"missing": "a_heavy_package_that_is_not_installed_123"})
+    steps["d"] = fake_step("d", calls, requires=["a"], inputs=["derived/a.npz"])
+    runner = Runner(episode(rec), steps, order=["a", "b", "c", "d"])
+    report = runner.run()
+    assert calls == ["a", "b", "d"]
+    assert statuses(report) == {"a": "ran", "b": "skipped", "c": "blocked", "d": "ran"}
+    assert report.ok  # a missing optional package is not a failure of the run
+    b = report.by_name()["b"]
+    assert b.reason.startswith("needs a_heavy_package_that_is_not_installed_123: pip install")
+    assert "step b" in b.reason and [r.name for r in report.skipped] == ["b"]
+    assert report.by_name()["c"].reason == "requires b (skipped)"
+    assert "skipped" in report.table() and not (rec / "derived" / "_runs" / "b.json").exists()
+    # --from / --until ranges are not an explicit selection
+    assert runner.run(from_="b").ok
+    # explicitly selected (--steps): the skip is an error, and so is a named step it blocks
+    report = runner.run(steps=["b"])
+    assert statuses(report) == {"a": "cached", "b": "failed"} and not report.ok
+    assert report.by_name()["b"].reason.startswith("needs a_heavy_package")
+    report = runner.run(steps=["c"])
+    assert statuses(report) == {"a": "cached", "b": "skipped", "c": "blocked"} and not report.ok
+    report = runner.run(steps=["a", "d"], force=True)
+    assert statuses(report) == {"a": "ran", "d": "ran"} and report.ok
+    # a real failure still fails the run
+    steps["d"] = fake_step("d", calls, requires=["a"], inputs=["derived/a.npz"], fail=True, version=2)
+    report = Runner(episode(rec), steps, order=["a", "b", "c", "d"]).run()
+    assert statuses(report)["d"] == "failed" and not report.ok
+
+
+def test_missing_dependency_exit_codes(rec, monkeypatch, capsys):
+    """``python -m glassesdata_pipeline run``: 0 when only optional steps were skipped, 1 when a
+    named step cannot run."""
+    from glassesdata_pipeline import __main__ as cli
+    from glassesdata_pipeline import runner as runner_mod
+
+    steps = chain([], b={"missing": "a_heavy_package_that_is_not_installed_123"})
+
+    class ChainRunner(runner_mod.Runner):
+        def __init__(self, ep):
+            super().__init__(episode(rec), steps, order=["a", "b", "c"])
+
+    monkeypatch.setattr(runner_mod, "Runner", ChainRunner)
+    assert cli.main(["run", str(rec)]) == 0
+    out = capsys.readouterr().out
+    assert "skipped" in out and "needs a_heavy_package_that_is_not_installed_123" in out
+    assert cli.main(["run", str(rec), "--steps", "b"]) == 1
+    assert cli.main(["run", str(rec), "--steps", "a"]) == 0
 
 
 def test_missing_outputs_fail_and_sidecar_cache(rec):

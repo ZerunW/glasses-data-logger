@@ -19,19 +19,21 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
-# The heavy set (Linux + CUDA machine only); see requirements.txt for install notes.
+# The heavy set (Linux + CUDA machine only): the same pins as requirements.txt (keep them in sync);
+# install torch from the CUDA index first (requirements.txt, scripts/setup_ubuntu.sh).
 heavy = [
-    "torch>=2.4",
+    "torch>=2.7",
+    "torchvision>=0.22",
     "transformers>=4.45",
-    "open3d>=0.18",
+    "open3d>=0.19",
     "trimesh>=4.4",
     "coacd>=1.0",
-    "mujoco>=3.2",
-    "mujoco-warp",
-    "warp-lang>=1.5",
-    "mink>=0.0.5",
-    "rerun-sdk>=0.20",
-    "rsl-rl-lib>=2.3",
+    "mujoco>=3.10,<5",
+    "mujoco-warp==4.0.1",
+    "warp-lang==1.19.0",
+    "mink==1.4.0",
+    "rsl-rl-lib==6.0.0",
+    "rerun-sdk==0.43.2",
 ]
 
 [project.scripts]

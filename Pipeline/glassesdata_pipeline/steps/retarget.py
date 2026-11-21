@@ -43,7 +43,7 @@ log = logging.getLogger(__name__)
 
 def menagerie_path(rcfg) -> Path:
     """``retarget.menagerie_path``, or ``$MUJOCO_MENAGERIE`` when the configured path does not exist."""
-    path = Path(str(rcfg.get("menagerie_path", "~/mujoco_menagerie"))).expanduser()
+    path = Path(str(rcfg.get("menagerie_path", "~/src/mujoco_menagerie"))).expanduser()
     if not path.is_dir() and os.environ.get("MUJOCO_MENAGERIE"):
         path = Path(os.environ["MUJOCO_MENAGERIE"]).expanduser()
     if not path.is_dir():

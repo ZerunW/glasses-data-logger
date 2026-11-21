@@ -1,26 +1,32 @@
 # Full install for the Ubuntu 24.04 + NVIDIA CUDA machine (PIPELINE.md section 0).
 # Nothing here is installed on the development Mac; only requirements-core.txt is needed there.
 #
+# scripts/setup_ubuntu.sh does all of this (venv, torch, these requirements, SAM 2, Menagerie, models).
+#
 # CUDA notes:
-# * Install PyTorch from the CUDA wheel index that matches the driver FIRST, e.g.
-#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-#   then `pip install -r requirements.txt` (pip keeps the CUDA build).
-# * mujoco-warp and warp-lang need an NVIDIA GPU with a CUDA 12 driver.
+# * Install PyTorch from the CUDA wheel index that matches the driver FIRST, then
+#   `pip install -r requirements.txt` (pip keeps the CUDA build). RTX 50-series GPUs (Blackwell,
+#   sm_120) need CUDA 12.8 or newer: driver >= 580 -> CUDA 13.0 wheels (current releases),
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu130
+#   driver 570-579 -> https://download.pytorch.org/whl/cu128 (its last torch is 2.11).
+#   Check: python -c "import torch; print(torch.cuda.get_arch_list())" lists sm_120.
+# * mujoco-warp and warp-lang need an NVIDIA GPU and driver (CUDA 12 or newer).
 # * PyAV wheels bundle FFmpeg; check `python -c "import av; print('libx265' in av.codecs_available)"`
 #   if you want to write synthetic recordings on Linux (decoding HEVC works regardless).
 -r requirements-core.txt
 
 # --- learned models -------------------------------------------------------------------------
-torch>=2.4                     # GPU tensors for every learned backend (see the CUDA note above)
+torch>=2.7                     # GPU tensors for every learned backend (see the CUDA note above; 2.7 = first cu128 release)
+torchvision>=0.22              # from the same index as torch (SAM 2, WiLoR / HaMeR)
 transformers>=4.45             # Depth Anything V2 (depth backend "depth_anything_v2") from Hugging Face
 # Not on PyPI as plain packages; install from source when the backend is used:
 #   WiLoR / HaMeR (hands2d / hand3d backends "wilor", "hamer"):  git clone + pip install -e . (needs CUDA)
-#   SAM 2 (objects.mask_backend "sam2"):  pip install "git+https://github.com/facebookresearch/sam2.git"
+#   SAM 2 (objects.mask_backend "sam2"):  SAM2_BUILD_CUDA=0 pip install --no-build-isolation "git+https://github.com/facebookresearch/sam2.git"
 #   Video Depth Anything (depth backend "video_depth_anything"): git clone + weights download
 #   Model weights are downloaded by each backend into ~/.cache (never into the repo).
 
 # --- geometry, meshes, reconstruction ---------------------------------------------------------
-open3d>=0.18                   # point clouds, TSDF fusion, ICP for object poses
+open3d>=0.19                   # point clouds, TSDF fusion, ICP for object poses (0.19 = first with Python 3.12 wheels)
 trimesh>=4.4                   # mesh I/O, convex hulls, mass properties (objects, scene)
 coacd>=1.0                     # convex decomposition for collision meshes (falls back to the hull)
 
@@ -30,7 +36,6 @@ mujoco-warp==4.0.1             # rl/ GPU backend (CUDA); needs mujoco-core>=4.0.
 warp-lang==1.19.0              # NVIDIA Warp for mujoco-warp (>=1.15); rl/ uses to_torch, ScopedCapture, capture_launch
 mink==1.4.0                    # retarget: differential IK (needs mujoco>=3.10; pulls qpsolvers[daqp], solver "daqp")
 rsl-rl-lib==6.0.0              # rl/ PPO: OnPolicyRunner/VecEnv/MLPModel API of 6.0.0 (pulls torch>=2.6, tensordict, tensorboard, GitPython, onnx)
-# RTX 50-series (Blackwell, sm_120) needs a CUDA 12.8 torch build: --index-url https://download.pytorch.org/whl/cu128
 
 # --- visualisation ------------------------------------------------------------------------------
 rerun-sdk==0.43.2              # viz/episode.rrd (AssetVideo of HEVC needs FFmpeg>=5.1 for the native viewer)

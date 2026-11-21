@@ -1,9 +1,9 @@
 # Step "retarget": hands_world.npz -> derived/retarget_<robot>.npz (floating robot hands, mink
 # differential IK per frame; PIPELINE.md section 5). Needs mujoco + mink (Linux machine) and a clone of
-# the MuJoCo Menagerie: git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie
+# the MuJoCo Menagerie: git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie ~/src/mujoco_menagerie
 [retarget]
 robot = "shadow"                       # robot table in glassesdata_pipeline/sim/robots.py
-menagerie_path = "~/mujoco_menagerie"  # Menagerie clone (env MUJOCO_MENAGERIE overrides when this does not exist)
+menagerie_path = "~/src/mujoco_menagerie"  # Menagerie clone (scripts/setup_ubuntu.sh puts it here; env MUJOCO_MENAGERIE overrides when this does not exist)
 hands = "auto"                         # "auto" (hands valid in >= min_valid_fraction of frames), or e.g. ["right"]
 min_valid_fraction = 0.2
 base_body = "palm"                     # free joint on the palm (forearm + wrist joints dropped) or "forearm"

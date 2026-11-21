@@ -98,3 +98,19 @@ def test_shipped_configs_load():
         assert section in cfg, section
     assert cfg.get("synth.gt_noise.hands2d_sigma_px") == 2.0
     assert cfg.get("synth.imu.time_offset_s") == 0.02
+
+
+def test_heavy_extras_match_requirements():
+    """pyproject.toml's [heavy] extras carry the same pins as requirements.txt (the Linux install)."""
+    import re
+    import tomllib
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    req = {}
+    for line in (root / "requirements.txt").read_text().splitlines():
+        line = line.split("#")[0].strip()
+        if line and not line.startswith("-r"):
+            req[re.split(r"[<>=!~]", line)[0]] = line
+    heavy = tomllib.loads((root / "pyproject.toml").read_text())["project"]["optional-dependencies"]["heavy"]
+    assert {re.split(r"[<>=!~]", spec)[0]: spec for spec in heavy} == req

@@ -22,6 +22,12 @@ after every successful run). ``force`` re-runs the explicitly selected steps.
 
 Selection: ``steps=[...]``, ``from_``, ``until`` choose steps in ORDER; with ``deps=True``
 (default) every transitive REQUIRES is added and re-run only when it is not up to date.
+
+Missing optional packages: a step whose ``run`` raises :class:`errors.MissingDependency` (e.g.
+``retarget`` / ``physics`` without MuJoCo) is ``skipped`` ("needs mujoco: pip install ...") and
+its dependents are ``blocked``; the run is still ``ok`` when nothing else failed. A step named
+in ``steps=[...]`` (``--steps``) that is skipped or blocked makes the run not ok (the user asked
+for it), and a skipped named step is reported as ``failed``.
 """
 
 from __future__ import annotations
@@ -30,6 +36,7 @@ import glob
 import importlib
 import json
 import logging
+import re
 import time
 import traceback
 from collections.abc import Iterable, Mapping, Sequence
@@ -40,7 +47,7 @@ from typing import Any
 
 from .config import normalize, params_hash
 from .episode import Episode, read_meta
-from .errors import PipelineError
+from .errors import MissingDependency, PipelineError
 
 log = logging.getLogger(__name__)
 
@@ -215,7 +222,7 @@ def cache_status(ep: Episode, step: Step, cfg: Mapping[str, Any] | None = None) 
 @dataclass
 class StepResult:
     name: str
-    status: str  # ran | cached | would-run | not-implemented | unavailable | blocked | failed | external
+    status: str  # ran | cached | would-run | not-implemented | unavailable | skipped | blocked | failed | external
     seconds: float = 0.0
     summary: Any = None
     reason: str = ""
@@ -224,10 +231,19 @@ class StepResult:
 @dataclass
 class RunReport:
     results: list[StepResult] = field(default_factory=list)
+    named: set[str] = field(default_factory=set)  # steps the caller named explicitly (``steps=[...]``)
 
     @property
     def ok(self) -> bool:
-        return not any(r.status == "failed" for r in self.results)
+        """No step failed, and every explicitly named step ran (or was cached). A step skipped for
+        a missing optional package (and its blocked dependents) is fine unless it was named."""
+        if any(r.status == "failed" for r in self.results):
+            return False
+        return not any(r.status in ("skipped", "blocked") and r.name in self.named for r in self.results)
+
+    @property
+    def skipped(self) -> list[StepResult]:
+        return [r for r in self.results if r.status == "skipped"]
 
     def by_name(self) -> dict[str, StepResult]:
         return {r.name: r for r in self.results}
@@ -238,6 +254,13 @@ class RunReport:
             detail = r.reason or (_summary_text(r.summary) if r.summary else "")
             lines.append(f"{r.name:<10} {r.status:<16} {r.seconds:>7.2f}s  {detail}")
         return "\n".join(lines)
+
+
+def _needs(error: MissingDependency) -> str:
+    """``"needs mujoco: pip install mujoco (needed for step retarget)"``."""
+    text = str(error)
+    match = re.match(r"pip install ['\"]?([A-Za-z0-9_.\-\[\]]+)", text)
+    return f"needs {match.group(1)}: {text}" if match else f"needs {text}"
 
 
 def _summary_text(summary: Any) -> str:
@@ -313,15 +336,19 @@ class Runner:
         selected = self.select(steps, from_, until)
         plan = self.with_dependencies(selected) if deps else selected
         explicit = set(selected)
-        report = RunReport()
+        named = set(selected) if steps else set()
+        report = RunReport(named=named)
         unavailable: dict[str, str] = {}  # step -> why its outputs cannot be relied on
         cfg = self.ep.config
         log.info("%s: steps %s", self.ep.path.name, " -> ".join(plan) if plan else "(none)")
         for name in plan:
             step = self.steps[name]
             result = self._run_one(step, cfg, force and name in explicit, unavailable, dry_run, plan)
+            if result.status == "skipped" and name in named:
+                log.error("[%s] was selected but cannot run: %s", name, result.reason)
+                result.status = "failed"
             report.results.append(result)
-            if result.status in ("failed", "blocked", "not-implemented", "unavailable"):
+            if result.status in ("failed", "blocked", "not-implemented", "unavailable", "skipped"):
                 unavailable[name] = result.status
         return report
 
@@ -372,6 +399,10 @@ class Runner:
         started = time.perf_counter()
         try:
             summary = step.module.run(self.ep, cfg)
+        except MissingDependency as error:
+            seconds = time.perf_counter() - started
+            log.warning("[%s] skipped: %s", name, _needs(error))
+            return StepResult(name, "skipped", seconds, reason=_needs(error))
         except Exception as error:  # noqa: BLE001
             seconds = time.perf_counter() - started
             log.error("[%s] failed after %.2f s: %s\n%s", name, seconds, error, traceback.format_exc())

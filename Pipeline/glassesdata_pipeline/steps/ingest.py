@@ -3,9 +3,11 @@
 * Video frames: ``frames.csv`` sorted by ``frame_index``; T = number of video frames (demuxed
   packets of ``video.mp4``; extra ``frames.csv`` rows are dropped with a warning). Episode time
   ``t = (phone_time_ns - t0_ns) * 1e-9`` with ``t0_ns`` = ``phone_time_ns`` of frame 0.
-* IMU: ``motion.csv`` rows sorted by ``phone_time_ns``; ``imu_t`` in episode seconds; values are
-  stored raw (units are decided by the ``imu`` step); empty cells are NaN. A missing
-  ``motion.csv`` gives N = 0 with a warning.
+* IMU: ``motion.csv`` rows from ``ingest.imu_sources`` (default only ``"glasses"``, the head IMU;
+  the app also writes ``"neuralBand"``, a wrist IMU, and ``"unknown"``) sorted by
+  ``phone_time_ns``; ``imu_t`` in episode seconds; ``imu_source[N]`` (extra) the source of each
+  row. Values are stored raw: the Meta SDK documents m/s^2, rad/s and µT; the ``imu`` step checks
+  the units. Empty cells are NaN. A missing ``motion.csv`` gives N = 0 with a warning.
 * Camera: ``calibration.json`` (K rescaled to the video size; aspect mismatch is an error) or the
   ``[camera]`` default (``source = "default"``).
 * Profile: ``profile.json`` completed with defaults, plus ``bone_lengths_m[20]`` and ``defaulted``.
@@ -22,7 +24,7 @@ from ..errors import PipelineError
 from ..recording import read_frames, read_motion
 
 NAME = "ingest"
-VERSION = 1
+VERSION = 2  # 2: imu_source, default imu_sources = ["glasses"]
 REQUIRES: list[str] = []
 INPUTS = ["frames.csv", "video.mp4", "motion.csv", "calibration.json", "profile.json"]
 OUTPUTS = ["timeline.npz", "camera.json", "profile.json"]
@@ -95,7 +97,9 @@ def _imu_arrays(ep: Episode, icfg, t0: int) -> dict[str, np.ndarray]:
         log.warning("%s has no motion.csv; the timeline has no IMU samples", ep.path.name)
         return _empty_imu()
     motion = read_motion(path)
-    sources = [str(s) for s in icfg.get("imu_sources", ["glasses", "phone"])]
+    sources = [str(s) for s in icfg.get("imu_sources", ["glasses"])]
+    if "neuralBand" in sources:
+        log.info("keeping neuralBand rows (a wrist IMU): imu_source marks them; they are never the head IMU")
     keep = np.isin(motion["source"], sources) if len(motion["source"]) else np.zeros(0, dtype=bool)
     if len(keep) and not np.all(keep):
         log.info("dropping %d motion rows from sources other than %s", int(np.sum(~keep)), sources)
@@ -126,6 +130,7 @@ def _imu_arrays(ep: Episode, icfg, t0: int) -> dict[str, np.ndarray]:
         "mag": motion["mag"].astype(np.float64),
         "quat": motion["quat"].astype(np.float64),
         "imu_is_glasses": is_glasses.astype(bool),
+        "imu_source": motion["source"].astype(str),
     }
 
 
@@ -137,4 +142,5 @@ def _empty_imu() -> dict[str, np.ndarray]:
         "mag": np.zeros((0, 3)),
         "quat": np.zeros((0, 4)),
         "imu_is_glasses": np.zeros(0, dtype=bool),
+        "imu_source": np.zeros(0, dtype=str),
     }

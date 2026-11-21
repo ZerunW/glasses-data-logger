@@ -1,9 +1,12 @@
 # Step "imu": camera-IMU rotation, time offset, gyro bias, gravity -> derived/imu.npz
 # (PIPELINE.md section 5; method in glassesdata_pipeline/steps/imu.py).
 [imu]
-use_phone_imu = false        # without glasses IMU, use the phone's (NOT rigidly attached to the head)
-accel_units = "auto"         # "auto" (median norm ~1 -> g, ~9.8 -> m/s^2), "g" or "m/s2"
-gyro_units = "auto"          # "rad/s", "deg/s" or "auto" (ratio to the visual rotation rate)
+use_phone_imu = false        # without glasses IMU, use rows labelled "phone" (older recordings; NOT rigidly
+                             # attached to the head). Neural Band rows (a wrist IMU) are never used.
+# The Meta SDK documents accelerometer m/s^2, gyroscope rad/s, magnetometer µT (the magnetometer
+# is not used). "auto" checks the data instead of trusting that (synthetic recordings write g).
+accel_units = "auto"         # "auto" (median norm ~9.8 -> m/s^2, ~1 -> g), "m/s2" or "g"
+gyro_units = "auto"          # "auto" (ratio to the visual rotation rate: ~1 -> rad/s, ~57 -> deg/s), "rad/s" or "deg/s"
 
 # ---- time offset (IMU time = video time + offset)
 max_offset_s = 0.2           # search range of the rate-norm cross-correlation

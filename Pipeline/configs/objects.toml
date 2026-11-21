@@ -103,6 +103,8 @@ max_jump_deg = 25.0
 # offset over the whole grasp: "0" (none), "3" (translation), "6".
 grasp_dof = "0"
 smooth_frames = 2.0          # Gaussian smoothing of the object poses inside a grasp (frames, 0 = off)
+no_table_penetration = true  # inside a grasp, an object over the table polygon is lifted so that no vertex
+                             # is below the table plane (hand depth errors push it into the table at pick-up/put-down)
 # After a release: one stacked ICP over the static segment with these degrees of freedom when the
 # object is upright (z within rest_max_tilt_deg of the table normal; "3" translation, "4" + yaw,
 # "6"), then it is put upright on the table; otherwise a full 6-DoF ICP.

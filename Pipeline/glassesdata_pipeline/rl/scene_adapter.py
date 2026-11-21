@@ -526,7 +526,7 @@ def compose_rl_scene(ep: Any, robot_name: str, side: str, object_id: str, train:
     if not ep.has("sim/scene.xml"):
         raise PipelineError(f"{ep.path}: no derived/sim/scene.xml - run the scene step (or set train.scene.xml)")
     robot = robots.get_robot(robot_name)
-    menagerie = Path(str(scfg.get("menagerie_path") or ep.config.get("retarget.menagerie_path") or "~/mujoco_menagerie")).expanduser()
+    menagerie = Path(str(scfg.get("menagerie_path") or ep.config.get("retarget.menagerie_path") or "~/src/mujoco_menagerie")).expanduser()
     if not menagerie.is_dir() and os.environ.get("MUJOCO_MENAGERIE"):  # same fallback as steps/retarget.py
         menagerie = Path(os.environ["MUJOCO_MENAGERIE"]).expanduser()
     if not menagerie.is_dir():

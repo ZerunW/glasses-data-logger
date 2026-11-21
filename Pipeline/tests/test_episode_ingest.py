@@ -114,3 +114,31 @@ def test_ingest_scales_calibration_and_handles_empty_cells(recording_copy):
     (recording_copy / "calibration.json").write_text(json.dumps(data))
     report = Runner(Episode(recording_copy)).run(steps=["ingest"])
     assert not report.ok and "aspect" in report.by_name()["ingest"].reason
+
+
+def test_ingest_keeps_only_the_head_imu_by_default(recording_copy):
+    """The app writes the SDK's MotionSource: "glasses" (head), "neuralBand" (wrist), "unknown".
+    Only glasses rows are kept by default; other sources can be selected but stay marked."""
+    lines = (recording_copy / "motion.csv").read_text().splitlines()
+    header = lines[0].split(",")
+    col = header.index("source")
+    extra = []
+    for line in lines[1:21]:
+        cells = line.split(",")
+        cells[col] = "neuralBand"
+        extra.append(",".join(cells))
+        cells[col] = "unknown"
+        extra.append(",".join(cells))
+    (recording_copy / "motion.csv").write_text("\n".join(lines + extra) + "\n")
+    n_glasses = len(lines) - 1
+    ep = Episode(recording_copy)
+    assert Runner(ep).run(steps=["ingest"]).ok
+    tl = ep.timeline()
+    assert len(tl["imu_t"]) == n_glasses and np.all(tl["imu_is_glasses"])
+    assert set(tl["imu_source"].tolist()) == {"glasses"}
+    ep = Episode(recording_copy, {"ingest": {"imu_sources": ["glasses", "neuralBand"]}})
+    assert Runner(ep).run(steps=["ingest"]).ok
+    tl = ep.timeline()
+    assert len(tl["imu_t"]) == n_glasses + 20
+    assert np.array_equal(tl["imu_is_glasses"], tl["imu_source"] == "glasses")
+    assert (tl["imu_source"] == "neuralBand").sum() == 20

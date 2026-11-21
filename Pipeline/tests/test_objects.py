@@ -166,3 +166,49 @@ def test_heavy_backends_are_lazy_and_report_missing_dependencies(tmp_path):
             with pytest.raises(MissingDependency):
                 call()
     assert callable(image_to_3d.generate_aligned)
+
+
+def test_near_surface_looks_past_the_grasping_hand():
+    """The grasp-point surface test: a depth model sees the grasping hand, which hides the object
+    at the onset; the least occluded frame before it decides. A pinch in mid-air is rejected."""
+    from glassesdata_pipeline import skeleton as sk
+    from glassesdata_pipeline.steps import objects as ob
+
+    T, onset = 20, 15
+    camera = geo.Camera.fov_default(360, 640, 65.0)
+    cam_d = camera.resized(90, 160)
+    depth = np.full((T, 160, 90), 1.0, np.float16)  # a wall 1 m in front of the camera
+    joints = np.full((T, 2, 21, 3), np.nan)
+    point = np.array([0.0, 0.0, 0.97])  # grasp point 3 cm in front of the wall
+    hand = point + 0.9 * (sk.rest_pose(sk.complete_profile({}), "right") - [0, 0.09, 0])  # a hand around it
+    for f in range(onset - 3, T):  # the hand arrives 3 frames before the onset and covers the point
+        joints[f, 1] = hand
+        depth[f, 60:100, 25:65] = 0.95  # what a depth model sees there: the hand
+    inp = ob.Inputs(
+        T=T, fps=24.0, t=np.arange(T) / 24.0, camera=camera, cam_d=cam_d, rays=np.asarray(cam_d.pixel_rays()),
+        depth=depth, row={f: f for f in range(T)}, scale=np.ones(T), T_wc=np.tile(np.eye(4), (T, 1, 1)),
+        cam_valid=np.ones(T, bool), joints=joints, kp2d=None, hand_radius=0.012, min_depth=0.1, max_depth=4.0,
+    )
+    near = ob._near_surface_fn(inp, 0.08)
+    assert near(1, onset, point) is True
+    assert near(1, onset, np.array([0.0, 0.0, 0.6])) is False  # 40 cm in front of anything
+    inp.joints[:] = hand  # the hand hides the point in every frame: unknown, not a rejection
+    inp._hand_cache.clear()
+    assert near(1, onset, point) is None
+
+
+def test_lift_above_table():
+    from glassesdata_pipeline.steps import objects as ob
+
+    table = {"found": True, "normal": [0.0, 0.0, 1.0], "offset": 0.7,  # plane z = -0.7
+             "polygon": np.array([[0.0, -0.5], [1.0, -0.5], [1.0, 0.5], [0.0, 0.5]])}
+    V = np.array([[x, y, z] for x in (-0.03, 0.03) for y in (-0.03, 0.03) for z in (-0.05, 0.05)])
+    T = geo.make_T(np.eye(3), [0.5, 0.0, -0.66])  # bottom 1 cm into the table
+    lifted, lift = ob.lift_above_table(T, V, table)
+    assert lift == pytest.approx(0.01) and lifted[2, 3] == pytest.approx(-0.65)
+    assert np.allclose(lifted[:3, :3], T[:3, :3])
+    above = geo.make_T(np.eye(3), [0.5, 0.0, -0.6])
+    assert ob.lift_above_table(above, V, table)[1] == 0.0
+    beside = geo.make_T(np.eye(3), [1.2, 0.0, -0.9])  # beyond the table edge: may go lower
+    assert ob.lift_above_table(beside, V, table)[1] == 0.0
+    assert ob.lift_above_table(T, V, {"found": False})[1] == 0.0

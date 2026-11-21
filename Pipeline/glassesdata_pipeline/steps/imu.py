@@ -8,13 +8,17 @@ pointing down, camera frame), ``R_world_slam[3,3]``, ``quality`` (JSON string), 
 
 Method (parameters in ``configs/imu.toml``):
 
-1. IMU samples: the glasses rows of ``timeline.npz``. Without them the phone's IMU is used only
-   when ``imu.use_phone_imu`` (the phone is not rigidly attached to the head: its calibration is
+1. IMU samples: the glasses rows of ``timeline.npz`` (the head IMU). Rows of other sources (the
+   Meta Neural Band is a wrist IMU) are never used. Without glasses rows, rows labelled ``"phone"``
+   (older recordings; the app does not send the phone's IMU) are used only when
+   ``imu.use_phone_imu`` (the phone is not rigidly attached to the head: its calibration is
    meaningless for the head); otherwise the outputs are identity / NaN with
    ``quality.gravity = "none"`` and a warning (gravity from the dominant horizontal plane is not
    implemented).
-2. Units: accelerometer from the median norm (``core.imu_filter.detect_accel_scale``) unless
-   ``imu.accel_units`` is ``"g"`` or ``"m/s2"``; gyroscope from ``imu.gyro_units`` (``"rad/s"``,
+2. Units (the Meta SDK documents m/s^2 and rad/s; ``"auto"`` checks): accelerometer from the
+   median norm (``core.imu_filter.detect_accel_scale``: ~9.8 -> m/s^2, ~1 -> g, which the synthetic
+   recordings write) unless ``imu.accel_units`` is ``"g"`` or ``"m/s2"``; gyroscope from
+   ``imu.gyro_units`` (``"rad/s"``,
    ``"deg/s"`` or ``"auto"``: the median ratio of gyro to visual rotation rates,
    ``gyro_scale_check``, ~1 -> rad/s, ~57 -> deg/s).
 3. Visual angular velocity: ``log(R_i^T R_{i+1}) / dt`` between consecutive valid ``slam`` frames,
@@ -147,9 +151,11 @@ def _select_samples(tl: dict[str, Any], p: dict[str, Any]) -> tuple[dict[str, np
     source = "glasses"
     sel = glasses
     if not np.any(glasses):
-        if bool(p["use_phone_imu"]):
+        names = np.asarray(tl.get("imu_source", np.where(glasses, "glasses", "phone")), dtype=str)
+        phone = names == "phone"  # never "neuralBand" (a wrist IMU) or "unknown"
+        if bool(p["use_phone_imu"]) and np.any(phone):
             log.warning("imu: no glasses IMU; using the PHONE IMU (not rigidly attached to the head)")
-            sel = ~glasses
+            sel = phone
             source = "phone"
         else:
             return None, "none"
@@ -213,7 +219,7 @@ def calibrate(ep: Episode, p: dict[str, Any]) -> dict[str, Any]:
     samples, source = _select_samples(tl, p)
     quality: dict[str, Any] = {"source": source}
     if samples is None:
-        log.warning("imu: no glasses IMU samples (imu.use_phone_imu = false): gravity unknown, "
+        log.warning("imu: no glasses IMU samples (the head IMU; see ingest.imu_sources): gravity unknown, "
                     "R_world_slam = identity; the world frame will not be gravity aligned")
         return _empty(T, quality)
     t_imu, acc_raw, gyro_raw = samples["t"], samples["acc"], samples["gyro"]

@@ -3,7 +3,7 @@
 Commands:
 
 * ``run REC [--steps a,b] [--from x] [--until y] [--force] [--no-deps] [--dry-run]``
-* ``synth OUT [--seconds 8] [--seed 0] [--size 360x640] [--draw-hands] [--overwrite]``
+* ``synth OUT [--seconds 8] [--seed 0] [--size 360x640] [--draw-hands | --no-draw-hands] [--overwrite]``
 * ``eval REC [--no-plots]``
 * ``list-steps [REC]``
 * ``view``, ``train``, ``eval-charuco``: delegate to ``glassesdata_pipeline.viz``,
@@ -66,7 +66,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seconds", type=float)
     p.add_argument("--seed", type=int)
     p.add_argument("--size", help="WIDTHxHEIGHT, e.g. 360x640 or 720x1280")
-    p.add_argument("--draw-hands", action="store_true", default=None, help="render hands and arms as capsules")
+    p.add_argument("--draw-hands", action=argparse.BooleanOptionalAction, default=None,
+                   help="render hands and arms as capsules (default: synth.draw_hands, true)")
     p.add_argument("--overwrite", action="store_true", help="replace an existing folder")
     _add_config_args(p)
 
@@ -102,6 +103,9 @@ def cmd_run(args: argparse.Namespace) -> int:
                             deps=not args.no_deps, dry_run=args.dry_run)
     print(report.table())
     print(f"total {time.perf_counter() - started:.2f} s")
+    if report.skipped:
+        names = ", ".join(r.name for r in report.skipped)
+        print(f"skipped (optional packages missing here): {names}; their dependents are blocked")
     return 0 if report.ok else 1
 
 
@@ -169,13 +173,30 @@ def cmd_lazy(name: str, argv: list[str]) -> int:
     return int(main_fn(argv) or 0)
 
 
+GLOBAL_FLAGS = ("-v", "--verbose", "-q", "--quiet")
+
+
+def _lazy_split(argv: list[str]) -> tuple[list[str], str, list[str]] | None:
+    """``[global flags], command, [its arguments]`` when the command is a lazy one: its arguments
+    go to the module's own parser untouched (argparse's REMAINDER would reject a leading option
+    such as ``train --help`` or ``view --export REC``)."""
+    for i, token in enumerate(argv):
+        if not token.startswith("-"):
+            if token in LAZY_COMMANDS and all(t in GLOBAL_FLAGS for t in argv[:i]):
+                return argv[:i], token, argv[i + 1:]
+            return None
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    lazy = _lazy_split(argv)
+    args = parser.parse_args(argv if lazy is None else [*lazy[0], lazy[1]])
     _setup_logging(args)
     try:
-        if args.command in LAZY_COMMANDS:
-            return cmd_lazy(args.command, args.args)
+        if lazy is not None:
+            return cmd_lazy(lazy[1], lazy[2])
         handler: dict[str, Any] = {
             "run": cmd_run, "synth": cmd_synth, "eval": cmd_eval, "list-steps": cmd_list_steps,
         }

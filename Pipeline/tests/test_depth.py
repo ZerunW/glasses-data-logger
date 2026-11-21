@@ -67,9 +67,11 @@ def test_model_backends_report_missing_torch(recording_copy, backend):
     ep = Episode(recording_copy, {"depth": {"backend": backend}})
     report = Runner(ep).run(until="depth")
     result = report.by_name()["depth"]
-    assert result.status == "failed" and "pip install torch" in result.reason
+    assert result.status == "skipped" and "pip install torch" in result.reason and report.ok
     assert not (ep.derived / "depth" / "depth_f16.npy").exists()
     assert not list((ep.derived / "depth").glob("*.partial"))
+    report = Runner(ep).run(steps=["depth"])  # named explicitly: an error
+    assert report.by_name()["depth"].status == "failed" and not report.ok
 
 
 def test_unknown_backend(recording_copy):

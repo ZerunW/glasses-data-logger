@@ -22,10 +22,12 @@ hand tracking, and the supporting table, ready for MuJoCo (PIPELINE.md section 5
    the rigid motion of the whole hand skeleton (generalised Procrustes of all 21 joints of the
    grasping hand, :func:`core.grasp.hand_rigid_motion`), anchored at the pose before the grasp and
    Gaussian-smoothed (optionally one stacked-ICP correction of the hand-object offset,
-   ``tracking.grasp_dof``). After a release: one robust point-to-plane ICP of the points of all
-   frames of the static segment (translation only when the object is upright), then the object is
-   put upright on the table. ``valid`` is False where the hand is missing (pose held) or the
-   static ICP failed. ``grasped[T, 2]``: two fingertips within ``contact_m`` of the surface during
+   ``tracking.grasp_dof``); an object over the table polygon is lifted out of the table plane
+   (``tracking.no_table_penetration``: the hand's depth error would otherwise push it into the
+   table while it is picked up and put down). After a release: one robust point-to-plane ICP of
+   the points of all frames of the static segment (translation only when the object is upright),
+   then the object is put upright on the table. ``valid`` is False where the hand is missing (pose
+   held) or the static ICP failed. ``grasped[T, 2]``: two fingertips within ``contact_m`` of the surface during
    a detected episode (or co-motion outside episodes). ``fitness`` is the per-frame fraction of
    observed points within ``max_correspondence_m`` of the posed model.
 
@@ -56,7 +58,7 @@ from ..errors import PipelineError
 from ..groundtruth import unpack_mask
 
 NAME = "objects"
-VERSION = 1
+VERSION = 2  # 2: near-surface test past the grasping hand, no table penetration while grasped
 REQUIRES = ["hands2d", "depth", "hand3d", "world"]
 OUTPUTS = ["objects/index.json", "objects/table.json"]
 CONFIG_SECTIONS = ["objects", "synth"]
@@ -303,25 +305,37 @@ def find_table(P: np.ndarray, Z: np.ndarray, anchors: np.ndarray, tcfg: Any) -> 
 # =============================================================================================
 
 
-def _near_surface_fn(inp: Inputs, near_m: float):
+def _near_surface_fn(inp: Inputs, near_m: float, lookback_s: float = 0.6, min_free_frac: float = 0.25):
+    """``near(hand, frame, point)`` for :func:`core.grasp.detect_grasps`: is the grasp point within
+    ``near_m`` (camera depth) of an observed surface that is not the hand, in a +-2 cm window around
+    its projection? The grasping hand usually hides that surface at the onset (a depth model sees
+    the hand, and what shows around its silhouette is the background), so the decision uses the
+    least occluded frame in ``[onset - lookback_s, onset]`` (the object is still static there): the
+    one with the most non-hand depth pixels in the window. None (unknown, not a rejection) when even
+    that frame has fewer than ``min_free_frac`` of the window free."""
+    lookback = max(2, int(round(lookback_s * inp.fps)))
+
     def near(hand: int, frame: int, point: np.ndarray) -> bool | None:
-        for f in (frame, frame - 1, frame + 1, frame - 2, frame + 2):
-            if 0 <= f < inp.T and inp.has(f):
-                X = geo.transform(geo.inv_T(inp.T_wc[f]), point)
-                uv = inp.cam_d.project(X)
-                if not np.all(np.isfinite(uv)):
-                    return None
-                u, v = int(round(uv[0])), int(round(uv[1]))
-                h, w = inp.shape
-                if not (0 <= u < w and 0 <= v < h):
-                    return None
-                r = max(1, int(round(inp.cam_d.fx * 0.02 / max(X[2], 0.1))))  # +-2 cm around the point
-                win = (slice(max(0, v - r), v + r + 1), slice(max(0, u - r), u + r + 1))
-                d = np.where(inp.hand_mask(f)[win], np.nan, inp.metric_depth(f)[win])  # the hand is no surface
-                if not np.any(np.isfinite(d)):
-                    return None
-                return bool(np.nanmin(np.abs(d - X[2])) <= near_m)
-        return None
+        best: tuple[int, int, bool] | None = None  # (free pixels, frame, decision); ties: nearest the onset
+        for f in range(frame, frame - lookback - 1, -1):
+            if not (0 <= f < inp.T and inp.has(f)):
+                continue
+            X = geo.transform(geo.inv_T(inp.T_wc[f]), point)
+            uv = inp.cam_d.project(X)
+            if not np.all(np.isfinite(uv)) or X[2] <= 0:
+                continue
+            u, v = int(round(uv[0])), int(round(uv[1]))
+            h, w = inp.shape
+            if not (0 <= u < w and 0 <= v < h):
+                continue
+            r = max(1, int(round(inp.cam_d.fx * 0.02 / max(X[2], 0.1))))  # +-2 cm around the point
+            win = (slice(max(0, v - r), v + r + 1), slice(max(0, u - r), u + r + 1))
+            d = np.where(inp.hand_mask(f)[win], np.nan, inp.metric_depth(f)[win])  # the hand is no surface
+            free = int(np.isfinite(d).sum())
+            if free < max(1, min_free_frac * d.size) or (best is not None and free <= best[0]):
+                continue
+            best = (free, f, bool(np.nanmin(np.abs(d - X[2])) <= near_m))
+        return None if best is None else best[2]
 
     return near
 
@@ -769,6 +783,32 @@ def rest_on_table(T: np.ndarray, vertices: np.ndarray, table: dict[str, Any], ma
     return geo.make_T(R, t - low * n), True
 
 
+def _inside_polygon(xy: np.ndarray, poly: np.ndarray) -> bool:
+    """``xy`` inside the convex polygon ``poly`` (either orientation)."""
+    poly = np.asarray(poly, dtype=np.float64).reshape(-1, 2)
+    if len(poly) < 3:
+        return False
+    edges = np.roll(poly, -1, axis=0) - poly
+    rel = np.asarray(xy, dtype=np.float64)[None] - poly
+    cross = edges[:, 0] * rel[:, 1] - edges[:, 1] * rel[:, 0]
+    return bool(np.all(cross >= 0) or np.all(cross <= 0))
+
+
+def lift_above_table(T: np.ndarray, vertices: np.ndarray, table: dict[str, Any]) -> tuple[np.ndarray, float]:
+    """An object whose centre is over the table polygon cannot be below the table plane: move it
+    along the normal so that its lowest vertex is on the plane (no change when it is above, or not
+    over the table). Returns the pose and the lift (m)."""
+    if not table.get("found") or not _inside_polygon(T[:2, 3], table.get("polygon", [])):
+        return T, 0.0
+    n = np.asarray(table["normal"], dtype=np.float64)
+    low = float(np.min(pl.plane_distance(vertices @ T[:3, :3].T + T[:3, 3], n, float(table["offset"]))))
+    if low >= 0.0:
+        return T, 0.0
+    out = T.copy()
+    out[:3, 3] -= low * n
+    return out, -low
+
+
 def track_object(inp: Inputs, tracker: Tracker, T0: np.ndarray, episodes: list[dict[str, Any]], tcfg: Any,
                  table: dict[str, Any], vertices: np.ndarray) -> dict[str, Any]:
     """Poses ``T_world_obj[T]`` (see the module docstring), ``valid``, ``fitness`` and statistics."""
@@ -791,6 +831,7 @@ def track_object(inp: Inputs, tracker: Tracker, T0: np.ndarray, episodes: list[d
         segments.append([a, b, hand])
     sigma = float(tcfg.get("smooth_frames", 2.0))
     snap_tilt = float(tcfg.get("rest_max_tilt_deg", 15.0))
+    no_penetration = bool(tcfg.get("no_table_penetration", True))
     cur = T0.copy()
 
     def static_segment(a: int, b: int, first: bool) -> None:
@@ -850,10 +891,17 @@ def track_object(inp: Inputs, tracker: Tracker, T0: np.ndarray, episodes: list[d
                 last = H[i] @ X
             raw[i] = last
         sm = gr.smooth_poses(raw, okH, sigma)
+        lifts = []
         for i, f in enumerate(frames):
             if f >= a:
                 poses[f] = sm[i]
                 valid[f] = bool(okH[i])
+                if no_penetration:
+                    poses[f], lift = lift_above_table(poses[f], vertices, table)
+                    lifts.append(lift)
+        if lifts:
+            info["lifted_frames"] = int(np.sum(np.asarray(lifts) > 0))
+            info["max_lift_m"] = float(np.max(lifts))
         cur = poses[b].copy()
         stats["segments"].append(info)
         seg_start = b + 1
@@ -961,7 +1009,7 @@ def run(ep: Episode, cfg: Any) -> dict[str, Any]:
     rejected: list[dict[str, Any]] = []
     prompts: list[dict[str, Any]] = []
     if bool(ocfg.get("auto_prompts", True)):
-        near = _near_surface_fn(inp, float(gcfg.get("near_surface_m", 0.08)))
+        near = _near_surface_fn(inp, float(gcfg.get("near_surface_m", 0.08)), float(gcfg.get("lookback_s", 0.6)))
         episodes, rejected = gr.detect_grasps(inp.joints, inp.fps, gcfg, near)
         for e in episodes:
             pr = grasp_prompt(inp, e, gcfg)

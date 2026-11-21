@@ -46,10 +46,20 @@ backend = "gt"
 
 [depth]
 backend = "gt"
-
+{depth_downsample}
 [objects]
 mask_backend = "gt"
 """
+
+
+def depth_downsample_for(width: int, depth_width_px: float) -> int:
+    """``depth.downsample`` that gives a depth grid about ``depth_width_px`` wide (0 = none: keep
+    the configured default). The real glasses' 720 px frames at ``downsample = 4`` give 180 px; a
+    360 px synthetic clip needs 2 for the same angular resolution of the depth, which hand3d's depth
+    scale, slam's landmarks and the objects' geometry depend on."""
+    if not depth_width_px or depth_width_px <= 0:
+        return 0
+    return max(1, int(round(width / float(depth_width_px))))
 
 
 def parse_size(size: str | tuple[int, int] | list[int]) -> tuple[int, int]:
@@ -105,7 +115,7 @@ def generate(
     seconds = float(s.get("seconds", 8.0) if seconds is None else seconds)
     seed = int(s.get("seed", 0) if seed is None else seed)
     width, height = parse_size(s.get("size", "360x640") if size is None else size)
-    draw_hands = bool(s.get("draw_hands", False) if draw_hands is None else draw_hands)
+    draw_hands = bool(s.get("draw_hands", True) if draw_hands is None else draw_hands)
     fps = float(s.get("fps", 24))
     n_frames = int(round(seconds * fps))
     if n_frames < 2:
@@ -233,7 +243,10 @@ def generate(
     profile_json = {"version": 1, **{k: profile[k] for k in sk.PROFILE_KEYS},
                     "measured": {k: k in measured_keys for k in sk.PROFILE_KEYS}}
     write_json(out / "profile.json", profile_json)
-    (out / "pipeline.toml").write_text(PIPELINE_TOML)
+    ds = depth_downsample_for(width, float(s.get("depth_width_px", 180)))
+    ds_line = (f"# depth grid ~{s.get('depth_width_px', 180)} px wide like the glasses' (synth.depth_width_px)\n"
+               f"downsample = {ds}\n") if ds else ""
+    (out / "pipeline.toml").write_text(PIPELINE_TOML.format(depth_downsample=ds_line))
     write_json(out / "info.json", {
         "receiver": f"glassesdata-pipeline synth {__version__}",
         "startedAt": STARTED,

@@ -12,8 +12,8 @@ from glassesdata_pipeline import skeleton as sk
 from glassesdata_pipeline.groundtruth import GroundTruth, unpack_mask
 from glassesdata_pipeline.recording import FRAMES_HEADER, MOTION_HEADER, read_frames, read_motion
 from glassesdata_pipeline.synth.imu import G, integrate_gyro, synthesize
-from glassesdata_pipeline.synth.scene import Box, Capsule, Scene, Texture, build_scene
-from glassesdata_pipeline.synth.generate import synthetic_camera
+from glassesdata_pipeline.synth.scene import HAND_LABEL, Box, Capsule, Scene, Texture, build_scene
+from glassesdata_pipeline.synth.generate import depth_downsample_for, hand_capsules, synthetic_camera
 from glassesdata_pipeline.synth.motion import Script, box_signed_distance
 
 
@@ -42,6 +42,7 @@ def test_recording_files(synth_recording, gt):
     assert calib["source"] == "synthetic" and calib["model"] == "pinhole" and len(calib["dist"]) == 5
     toml = tomllib.loads((rec / "pipeline.toml").read_text())
     assert toml["hands2d"]["backend"] == "gt" and toml["depth"]["backend"] == "gt"
+    assert "downsample" not in toml["depth"]  # the test fixture sets synth.depth_width_px = 0
     assert toml["objects"]["mask_backend"] == "gt"
     motion = read_motion(rec / "motion.csv")
     assert set(motion["source"]) == {"glasses"} and np.all(np.isnan(motion["quat"])) and np.all(np.isnan(motion["mag"]))
@@ -65,15 +66,30 @@ def test_video_frames_match_renders(synth_recording, gt, camera):
         decoded = [f.to_ndarray(format="bgr24") for f in container.decode(video=0)]
     assert len(decoded) == len(frames["phone_ns"]) == gt.n_frames
     assert list(frames["keyframe"]) == [i % 24 == 0 for i in range(48)]
-    # Re-render two frames from the ground truth and compare with the decoded video.
-    rng = np.random.default_rng(0)
-    scene, layout = build_scene(rng, float(gt["table_height_m"]))
-    T_room_world = geo.inv_T(gt["T_world_room"])
+    # Re-render two frames from the ground truth and compare with the decoded video (hands and
+    # arms are drawn by default: synth.draw_hands = true).
+    assert json.loads((synth_recording / "gt" / "meta.json").read_text())["draw_hands"] is True
     for i in (7, 40):
-        for k, box in enumerate(scene.objects()):
-            box.set_pose(T_room_world @ gt["T_world_obj"][i, k])
-        image = scene.render(camera, T_room_world @ gt["T_world_cam"][i])["image"]
+        image = _rerender(gt, camera, i)["image"]
         assert cv2.PSNR(image, decoded[i]) > 30
+        without = _rerender(gt, camera, i, hands=False)["image"]
+        assert cv2.PSNR(without, decoded[i]) < cv2.PSNR(image, decoded[i]) - 3  # the hands are in the video
+
+
+def _rerender(gt, camera, i, hands=True):
+    """Render frame ``i`` again from the ground truth (seed 0 scene), with or without the hand and
+    arm capsules."""
+    scene, _ = build_scene(np.random.default_rng(0), float(gt["table_height_m"]))
+    T_room_world = geo.inv_T(gt["T_world_room"])
+    to_room = lambda p: geo.transform(T_room_world, p)  # noqa: E731
+    for k, box in enumerate(scene.objects()):
+        box.set_pose(T_room_world @ gt["T_world_obj"][i, k])
+    capsules = []
+    if hands:
+        for h in range(2):
+            capsules += hand_capsules(to_room(gt["joints_world"][i, h]), to_room(gt["shoulder_world"][i, h]),
+                                      to_room(gt["elbow_world"][i, h]))
+    return scene.render(camera, T_room_world @ gt["T_world_cam"][i], capsules or None)
 
 
 def _inside_convex(xy, poly, margin):
@@ -109,6 +125,7 @@ def test_depth_matches_analytic_planes(gt, camera):
             if kind == "table":
                 inside = _inside_convex(p[..., :2], poly, margin=0.01)
                 free = ~np.any([unpack_mask(masks["packed"][i, k], masks["shape"]) for k in range(2)], axis=0)
+                free &= _rerender(gt, camera, i)["label"] != HAND_LABEL  # hands/arms are drawn
                 free = cv2.erode(free.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
                 sel = ok & inside & free
                 assert sel.sum() > 1000
@@ -131,12 +148,19 @@ def test_joint_projections_and_visibility(gt, camera):
     T = gt["T_world_cam"]
     J = geo.transform(geo.inv_T(T)[:, None, None], gt["joints_world"])
     assert np.allclose(J, gt["joints_cam"], atol=1e-9)
-    # GT depth at visible joints is not much closer than the joint itself
+    # The scene depth (without the drawn hands) at visible joints is not much closer than the joint
+    # itself; the recorded depth there is the hand's own surface: in front of the joint centre, by
+    # less than the thickest capsule.
     depth = gt.depth()
-    t_idx, h_idx, j_idx = np.nonzero(vis)
-    u = np.clip(np.rint(uv[t_idx, h_idx, j_idx, 0]).astype(int), 0, camera.width - 1)
-    v = np.clip(np.rint(uv[t_idx, h_idx, j_idx, 1]).astype(int), 0, camera.height - 1)
-    assert np.all(gt["joints_cam"][t_idx, h_idx, j_idx, 2] <= depth[t_idx, v, u].astype(np.float64) * 1.002 + 0.0105)
+    for i in (0, 24, 47):
+        h_idx, j_idx = np.nonzero(vis[i])
+        u = np.clip(np.rint(uv[i, h_idx, j_idx, 0]).astype(int), 0, camera.width - 1)
+        v = np.clip(np.rint(uv[i, h_idx, j_idx, 1]).astype(int), 0, camera.height - 1)
+        z = gt["joints_cam"][i, h_idx, j_idx, 2]
+        scene_depth = _rerender(gt, camera, i, hands=False)["scene_depth"].astype(np.float64)
+        assert len(z) and np.all(z <= scene_depth[v, u] * 1.002 + 0.0105)
+        surface = depth[i, v, u].astype(np.float64)
+        assert np.all(surface <= z * 1.002 + 1e-3) and np.median(z - surface) < 0.03
 
 
 def test_world_frame_convention(gt):
@@ -294,3 +318,10 @@ def test_capsule_rendering_occludes():
     assert np.isclose(out["depth"][cy, cx], z_expected, atol=1e-5)
     assert out["label"][cy, cx] == -2 and out["image"][cy, cx, 2] > out["image"][cy, cx, 0]
     assert out["depth"][0, 0] == out["scene_depth"][0, 0]
+
+
+def test_depth_grid_matches_the_glasses():
+    """pipeline.toml picks depth.downsample so the depth grid is ~synth.depth_width_px wide (the
+    glasses' 720 px at downsample 4 = 180 px)."""
+    assert [depth_downsample_for(w, 180) for w in (90, 180, 270, 360, 720)] == [1, 1, 2, 2, 4]
+    assert depth_downsample_for(360, 0) == 0

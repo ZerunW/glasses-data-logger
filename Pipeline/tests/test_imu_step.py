@@ -145,8 +145,37 @@ def test_no_glasses_imu(imu_rec, tmp_path, caplog):
     # The phone IMU only when asked for (here the samples are the glasses' re-labelled).
     p = imu.params(ep.config)
     p["use_phone_imu"] = True
+    _rewrite_timeline(ep, imu_source=np.full(len(tl["imu_t"]), "phone"))
     res = imu.calibrate(ep, p)
     assert res["quality"]["source"] == "phone" and res["quality"]["gravity"] == "phone"
+    # A Neural Band (wrist IMU) is never taken for the head, not even with use_phone_imu.
+    _rewrite_timeline(ep, imu_source=np.full(len(tl["imu_t"]), "neuralBand"))
+    res = imu.calibrate(ep, p)
+    assert res["quality"]["gravity"] == "none"
+
+
+def test_accelerometer_in_m_per_s2_like_the_sdk(imu_rec, tmp_path, caplog):
+    """The Meta SDK documents m/s^2 (the synthetic recordings write g): same result, no extra
+    warnings."""
+    import logging
+
+    ep = Episode(imu_rec)
+    with caplog.at_level(logging.WARNING):
+        ref = imu.calibrate(ep, imu.params(ep.config))
+    warnings_g = sorted(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+    caplog.clear()
+    dst = tmp_path / "rec"
+    shutil.copytree(imu_rec, dst)
+    ep = Episode(dst)
+    _rewrite_timeline(ep, acc=ep.timeline()["acc"] * 9.80665)
+    with caplog.at_level(logging.WARNING):
+        res = imu.calibrate(ep, imu.params(ep.config))
+    warnings_ms2 = sorted(r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING)
+    assert res["quality"]["accel_units"] == "m/s2" and res["accel_scale"] == 1.0
+    assert warnings_ms2 == warnings_g
+    assert np.allclose(res["R_cam_imu"], ref["R_cam_imu"], atol=1e-9)
+    assert np.allclose(res["gravity_cam"], ref["gravity_cam"], atol=1e-6)
+    assert np.allclose(res["accel_bias"], ref["accel_bias"], atol=1e-6)
 
 
 def test_fixed_extrinsic(imu_rec):
