@@ -29,7 +29,7 @@ def test_csv_headers_match_the_receiver():
 def test_cli_list_run_eval_and_lazy(synth_recording, tmp_path, capsys):
     assert main(["list-steps"]) == 0
     out = capsys.readouterr().out
-    assert "ingest" in out and "implemented" in out and "not implemented yet" in out
+    assert "ingest" in out and "implemented" in out  # every step module exists now
     rec = tmp_path / "rec"
     import shutil
 
@@ -43,9 +43,14 @@ def test_cli_list_run_eval_and_lazy(synth_recording, tmp_path, capsys):
     assert rows[0]["name"] == "ingest" and rows[0]["cache"] == "parameters changed"
     assert main(["eval", str(rec), "--no-plots"]) == 0
     assert (rec / "derived" / "eval.json").is_file()
-    for command in ("view", "train", "eval-charuco"):
-        assert main([command, str(rec)]) == 2
-        assert "not implemented yet" in capsys.readouterr().out
+    assert main(["view", str(rec)]) == 2  # no derived/viz/episode.rrd yet: says how to create / open one
+    assert "episode.rrd" in capsys.readouterr().out
+    import importlib.util
+
+    if importlib.util.find_spec("rsl_rl") is None:  # train is implemented (rl/); without rsl_rl it names the install
+        assert main(["train", str(rec)]) == 1
+        assert "rsl-rl-lib" in capsys.readouterr().err
+    assert main(["eval-charuco", str(rec)]) == 1  # implemented; this recording has no board definition
     assert main(["run", str(rec), "--steps", "nope"]) == 1
 
 

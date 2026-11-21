@@ -25,11 +25,12 @@ trimesh>=4.4                   # mesh I/O, convex hulls, mass properties (object
 coacd>=1.0                     # convex decomposition for collision meshes (falls back to the hull)
 
 # --- simulation, retargeting, RL ----------------------------------------------------------------
-mujoco>=3.2                    # MJCF scene, kinematic replay, physics plausibility check
-mujoco-warp                    # GPU-batched MuJoCo for RL (CUDA)
-warp-lang>=1.5                 # NVIDIA Warp, required by mujoco-warp (CUDA)
-mink>=0.0.5                    # differential IK for hand/arm retargeting to robots
-rsl-rl-lib>=2.3                # PPO training (rl/)
+mujoco>=3.10,<5                # scene replay / physics: coded against the 3.17.0 and 4.0.1 APIs (Renderer, mjv_connector)
+mujoco-warp==4.0.1             # rl/ GPU backend (CUDA); needs mujoco-core>=4.0.0, so mujoco resolves to 4.x (rl/ coded against 4.0.1)
+warp-lang==1.19.0              # NVIDIA Warp for mujoco-warp (>=1.15); rl/ uses to_torch, ScopedCapture, capture_launch
+mink==1.4.0                    # retarget: differential IK (needs mujoco>=3.10; pulls qpsolvers[daqp], solver "daqp")
+rsl-rl-lib==6.0.0              # rl/ PPO: OnPolicyRunner/VecEnv/MLPModel API of 6.0.0 (pulls torch>=2.6, tensordict, tensorboard, GitPython, onnx)
+# RTX 50-series (Blackwell, sm_120) needs a CUDA 12.8 torch build: --index-url https://download.pytorch.org/whl/cu128
 
 # --- visualisation ------------------------------------------------------------------------------
-rerun-sdk>=0.20                # viz/episode.rrd recordings
+rerun-sdk==0.43.2              # viz/episode.rrd (AssetVideo of HEVC needs FFmpeg>=5.1 for the native viewer)

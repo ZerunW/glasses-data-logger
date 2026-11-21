@@ -1,0 +1,125 @@
+# RL training on a reconstructed episode: python -m glassesdata_pipeline train REC (package rl/).
+# A floating robot hand learns to reproduce the demo's object motion in MuJoCo (see rl/__init__.py).
+[train]
+robot = "shadow_right"     # "<robot>_<side>"; robot from sim/robots.py, side left|right (CLI --robot)
+backend = "warp"           # "warp" (MuJoCo Warp, GPU, thousands of worlds) or "mujoco" (CPU smoke test) (CLI --backend)
+num_envs = 4096            # parallel worlds (CLI --num-envs); 16-64 for the CPU backend
+iterations = 2000          # PPO iterations (CLI --iterations)
+seed = 0                   # torch / sampling seed
+device = "cuda:0"          # torch + warp device for training (the CPU backend computes on "cpu")
+run_name = ""              # run folder name under derived/rl/ ("" = <date>_<robot>_<side>) (CLI --run)
+object = "auto"            # objects/<id> to track; "auto" = the object the hand grasps in the most frames
+hand = "auto"              # human hand whose grasp flags count ("left"/"right"); "auto" = the robot's side
+segment_s = [0.0, 0.0]     # [start, end] episode seconds to use; end <= start = the whole demo
+control_dt = 0.02          # policy period (s); physics substeps = round(control_dt / scene timestep)
+smooth_sigma_s = 0.02      # Gaussian smoothing of the resampled reference (s); 0 = off
+max_gap_s = 0.5            # warn when the hand/object reference has a longer gap (filled by interpolation)
+lookahead_steps = 5        # observation shows the reference object at t+1 and t+k (k = this)
+max_episode_steps = 0      # cap on episode length in control steps; 0 = until the demo end
+min_episode_steps = 10     # random starts leave at least this many steps before the demo end
+p_start_at_zero = 0.1      # probability that an episode starts at the demo start instead of a random step
+init_at_random_ep_len = false  # rsl_rl's random initial episode length (not needed with random starts)
+
+[train.scene]
+xml = ""                   # use this MJCF instead of composing sim/scene.xml + robot (then set the names below)
+base_body = "auto"         # floating base body: "palm" | "forearm"; "auto" = what the retarget step used
+menagerie_path = ""        # mujoco_menagerie clone; "" = retarget.menagerie_path
+root_body = ""             # (xml only) hand root body with the free joint or the 6 base joints
+mocap_body = ""            # (xml only) mocap body welded to the root
+tip_sites = []             # (xml only) fingertip site names
+object_body = ""           # (xml only) object body; "" = obj_<id>
+
+[train.noise]              # reference state initialisation noise (standard deviations)
+finger_qpos = 0.05         # rad, finger joints (clipped to the joint limits)
+base_pos = 0.005           # m, hand base position
+base_rot = 0.02            # rad, hand base orientation
+obj_pos_xy = 0.005         # m, object horizontal position
+obj_pos_z = 0.002          # m, object height (upwards only, never into the table)
+obj_rot = 0.02             # rad, object orientation
+
+[train.action]             # actions are residuals on the reference, in [-clip, clip]
+clip = 1.0
+base_pos = 0.02            # m per unit action (base position: mocap target or slide actuators)
+base_rot = 0.10            # rad per unit action (base orientation, rotation vector in the world frame)
+finger = 0.30              # rad per unit action and per coupled joint (finger position actuators)
+
+[train.reward]             # weights; terms are documented in rl/rewards.py
+obj_pos = 5.0              # object position tracking, exp kernel
+obj_rot = 2.0              # object orientation tracking
+hand_qpos = 1.0            # finger joint imitation
+base_pos = 0.5             # wrist position imitation
+base_rot = 0.5             # wrist orientation imitation
+tips = 1.0                 # fingertip position imitation
+contact = 1.0              # fingertips near the object while the demo grasps
+action_rate = 0.01         # penalty: sum (a_t - a_{t-1})^2
+energy = 0.0005            # penalty: sum |actuator force * joint velocity| (W)
+termination = 10.0         # penalty on early termination
+contact_near_m = 0.03      # demo contact fingertips: object-centre distance within this of the closest fingertip's
+
+[train.reward.sigma]       # exp kernel widths: reward = exp(-(error / sigma)^2)
+obj_pos = 0.05             # m
+obj_rot = 0.5              # rad
+hand_qpos = 0.4            # rad (rms over finger joints)
+base_pos = 0.05            # m
+base_rot = 0.3             # rad
+tips = 0.03                # m (mean over fingertips)
+contact = 0.02             # m (fingertip distance beyond the demo's)
+
+[train.termination]        # early termination (failure); errors against the reference at the same step
+obj_pos_m = 0.10           # object position error
+obj_rot_rad = 0.0          # object orientation error; 0 = off
+fall_below_table_m = 0.05  # object centre below the table top by this much (needs sim/scene.json table)
+base_pos_m = 0.25          # hand base position error; 0 = off
+grace_steps = 0            # no error checks during the first steps of an episode
+
+[train.domain]             # per-world randomisation, resampled at every reset
+mass_scale = [0.7, 1.3]    # object mass and inertia factor
+friction_scale = [0.7, 1.3]  # sliding friction factor of the object and hand geoms
+resample_on_reset = true
+
+[train.obs]
+vel_scale = 0.1            # velocities are multiplied by this in the observation
+clip = 100.0               # observation clip (after replacing non-finite values by 0)
+
+[train.ppo]                # rsl-rl-lib 6.0.0 OnPolicyRunner / PPO / MLPModel settings
+num_steps_per_env = 24
+save_interval = 50         # checkpoint model_<it>.pt every this many iterations
+logger = "tensorboard"
+actor_hidden_dims = [512, 256, 128]
+critic_hidden_dims = [512, 256, 128]
+activation = "elu"
+obs_normalization = true   # empirical observation normalisation (actor and critic)
+init_noise_std = 0.5
+noise_std_type = "scalar"  # "scalar" or "log"
+learning_rate = 3e-4
+schedule = "adaptive"      # "adaptive" (KL-based) or "fixed"
+desired_kl = 0.01
+num_learning_epochs = 5
+num_mini_batches = 4
+clip_param = 0.2
+gamma = 0.99
+lam = 0.95
+value_loss_coef = 1.0
+entropy_coef = 0.0
+max_grad_norm = 1.0
+use_clipped_value_loss = true
+
+[train.warp]               # MuJoCo Warp backend
+nconmax = 96               # contacts allocated per world (raise on NARROWPHASE/BROADPHASE overflow warnings)
+njmax = 512                # constraint rows per world (raise on NEFC overflow warnings)
+graph_capture = true       # CUDA graph of the physics substeps
+sync = true                # synchronise the device around Warp launches (torch and Warp streams)
+overflow_check_interval = 100  # control steps between overflow checks (device-to-host copy); 0 = never
+
+[train.play]               # --play: CPU rollout of a checkpoint, video and metrics
+episodes = 1
+video = true
+width = 640
+height = 480
+camera = ""                # model camera name; "" = a free camera looking at the object path
+distance = 0.7             # free camera distance (m)
+azimuth = 135.0
+elevation = -25.0
+lift_height_m = 0.03       # the demo lifts when the reference object rises at least this much
+lift_fraction = 0.5        # lift success: the simulated object reaches this fraction of the demo's lift
+success_pos_m = 0.05       # tracking success: mean object position error below this
