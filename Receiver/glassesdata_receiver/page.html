@@ -1,0 +1,2354 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<link rel="icon" href="data:,">
+<title>GlassesData receiver</title>
+<style>
+/* ------------------------------------------------------------------ tokens */
+:root {
+  color-scheme: dark;
+  /* surfaces */
+  --bg: #09090b;
+  --surface: #111114;
+  --surface-2: #17171b;
+  --surface-3: #1f1f24;
+  --raised: #2a2a31;
+  --stage: #050506;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-strong: rgba(255, 255, 255, 0.13);
+  /* text */
+  --text: #ececf1;
+  --text-2: #a3a3ae;
+  --text-3: #8a8a95;
+  /* one accent, red for recording, semantic health */
+  --accent: #8189ff;
+  --accent-ink: #0b0b12;
+  --accent-weak: rgba(129, 137, 255, 0.14);
+  --good: #3ecf8e;
+  --warn: #f5b546;
+  --bad: #ff6b6b;
+  --rec: #ff3b3b;
+  --good-weak: rgba(62, 207, 142, 0.12);
+  --warn-weak: rgba(245, 181, 70, 0.13);
+  --bad-weak: rgba(255, 107, 107, 0.13);
+  --rec-weak: rgba(255, 59, 59, 0.16);
+  /* data colours: the two hands, and x / y / z of the IMU charts */
+  --hand-left: #3dd6f5;
+  --hand-right: #f472b6;
+  --axis-x: #6cb6ff;
+  --axis-y: #b794f6;
+  --axis-z: #f0a6ca;
+  --chart-line: #c9c9d3;
+  --chart-grid: rgba(255, 255, 255, 0.06);
+  /* type */
+  --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --fs-label: 11px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-title: 14px;
+  --fs-num: 22px;
+  --fs-timer: 26px;
+  /* shape and rhythm (4 px grid) */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-xl: 18px;
+  --pad: 16px;
+  --topbar-h: 52px;
+  --transport-h: 76px;
+  --inspector-min: 440px;
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 24px rgba(0, 0, 0, 0.35);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --aspect: 0.5625;
+  --ar: 9 / 16;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #f3f3f5;
+    --surface: #ffffff;
+    --surface-2: #f7f7f9;
+    --surface-3: #ececf0;
+    --raised: #ffffff;
+    --stage: #e6e6ea;
+    --line: rgba(17, 17, 26, 0.08);
+    --line-strong: rgba(17, 17, 26, 0.15);
+    --text: #111116;
+    --text-2: #52525c;
+    --text-3: #66666f;
+    --accent: #4f55e0;
+    --accent-ink: #ffffff;
+    --accent-weak: rgba(79, 85, 224, 0.1);
+    --good: #12804b;
+    --warn: #9a5800;
+    --bad: #cc2936;
+    --rec: #e0242a;
+    --good-weak: rgba(18, 128, 75, 0.09);
+    --warn-weak: rgba(196, 120, 0, 0.11);
+    --bad-weak: rgba(204, 41, 54, 0.09);
+    --rec-weak: rgba(224, 36, 42, 0.1);
+    --axis-x: #1f74d6;
+    --axis-y: #7a4fd6;
+    --axis-z: #c43c80;
+    --chart-line: #3c3c46;
+    --chart-grid: rgba(17, 17, 26, 0.07);
+    --shadow: 0 1px 2px rgba(17, 17, 26, 0.05), 0 4px 16px rgba(17, 17, 26, 0.05);
+  }
+}
+
+/* ------------------------------------------------------------------ base */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: var(--fs-body)/1.45 var(--font);
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+svg.i.sm { width: 14px; height: 14px; }
+svg.i.lg { width: 22px; height: 22px; stroke-width: 1.4; }
+.num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+.muted { color: var(--text-2); }
+.faint { color: var(--text-3); }
+.good { color: var(--good); }
+.warn { color: var(--warn); }
+.bad { color: var(--bad); }
+[hidden] { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  border: 0;
+  background: none;
+  padding: 0;
+}
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible { outline: none; box-shadow: var(--focus); }
+button:disabled { cursor: not-allowed; }
+kbd {
+  font: 600 10px/1 var(--mono);
+  color: var(--text-3);
+  border: 1px solid var(--line-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 2px 4px;
+  min-width: 16px;
+  text-align: center;
+  display: inline-block;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 550;
+  white-space: nowrap;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+}
+.btn:hover:not(:disabled) { background: var(--surface-3); border-color: var(--line-strong); }
+.btn:disabled { opacity: 0.5; }
+.btn.on { background: var(--accent-weak); border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--text); }
+.btn.on svg.i { color: var(--accent); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
+.btn.ghost:hover:not(:disabled) { background: var(--surface-2); color: var(--text); }
+.btn.small { height: 28px; padding: 0 8px; font-size: var(--fs-small); border-radius: var(--r-sm); gap: 6px; }
+
+/* switch: a button with role="switch" and aria-checked */
+.switch {
+  position: relative;
+  width: 36px;
+  height: 22px;
+  flex: none;
+  border-radius: 999px;
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  transition: background-color 0.18s, box-shadow 0.18s;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--text-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  transition: transform 0.18s var(--ease), background-color 0.18s;
+}
+.switch[aria-checked="true"] { background: var(--accent); box-shadow: none; }
+.switch[aria-checked="true"]::after { transform: translateX(14px); background: var(--accent-ink); }
+.switch:disabled { opacity: 0.45; }
+.switch:hover:not(:disabled)::after { background: var(--text); }
+.switch[aria-checked="true"]:hover:not(:disabled)::after { background: var(--accent-ink); }
+
+/* segmented control: buttons with aria-pressed */
+.segmented {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.segmented button {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  color: var(--text-2);
+  font-weight: 550;
+  transition: background-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.segmented button:hover:not([aria-pressed="true"]) { color: var(--text); }
+.segmented button[aria-pressed="true"] { background: var(--raised); color: var(--text); box-shadow: 0 0 0 1px var(--line-strong), 0 1px 2px rgba(0, 0, 0, 0.18); }
+
+/* slider: a range input; --fill is set from the value */
+.slider { -webkit-appearance: none; appearance: none; width: 100%; height: 22px; margin: 0; background: transparent; cursor: pointer; --fill: 50%; }
+.slider::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--accent) var(--fill), var(--surface-3) var(--fill)); }
+.slider::-moz-range-track { height: 4px; border-radius: 2px; background: var(--surface-3); }
+.slider::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
+.slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; margin-top: -7px; border-radius: 50%; background: var(--raised); box-shadow: 0 0 0 1px var(--line-strong), 0 1px 3px rgba(0, 0, 0, 0.35); }
+.slider::-moz-range-thumb { width: 18px; height: 18px; border: 0; border-radius: 50%; background: var(--raised); box-shadow: 0 0 0 1px var(--line-strong), 0 1px 3px rgba(0, 0, 0, 0.35); }
+.slider:focus-visible { outline: none; }
+.slider:focus-visible::-webkit-slider-thumb { box-shadow: var(--focus); }
+.slider:focus-visible::-moz-range-thumb { box-shadow: var(--focus); }
+
+/* ------------------------------------------------------------------ top bar */
+.topbar {
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 var(--pad) 0 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.brand { display: flex; align-items: center; gap: 10px; font-size: var(--fs-title); white-space: nowrap; }
+.brand-mark { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); }
+.brand-mark svg.i { width: 18px; height: 18px; stroke-width: 1.8; }
+.brand b { font-weight: 650; letter-spacing: -0.01em; }
+.brand span { color: var(--text-3); font-weight: 500; }
+.divider { width: 1px; height: 20px; background: var(--line-strong); }
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  white-space: nowrap;
+  min-width: 0;
+}
+.pill strong { color: var(--text); font-weight: 600; overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; min-width: 3ch; }
+#link-extra { overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 10 auto; }
+.pill .sep { color: var(--text-3); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-3); flex: none; transition: background-color 0.3s; }
+.dot.good { background: var(--good); box-shadow: 0 0 0 3px var(--good-weak); }
+.dot.warn { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-weak); }
+.dot.bad { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-weak); }
+.dot.rec { background: var(--rec); box-shadow: 0 0 0 3px var(--rec-weak); }
+#link-pill { flex: 0 1 auto; overflow: hidden; }
+.topbar .spacer { flex: 1; }
+#rec-pill { color: var(--rec); background: var(--rec-weak); border-color: transparent; font-weight: 600; }
+#rec-pill .dot { animation: blink 1.6s ease-in-out infinite; }
+.shortcuts { display: flex; align-items: center; gap: 10px; color: var(--text-3); font-size: var(--fs-small); white-space: nowrap; }
+.shortcuts span { display: inline-flex; align-items: center; gap: 5px; }
+
+#banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 20px;
+  background: var(--bad-weak);
+  color: var(--bad);
+  border-bottom: 1px solid var(--line);
+  font-weight: 550;
+}
+
+/* ------------------------------------------------------------------ shell */
+.shell {
+  --frame-h: calc(100dvh - var(--topbar-h) - var(--transport-h) - 3 * var(--pad) - var(--banner-h, 0px));
+  --frame-w: min(calc(var(--frame-h) * var(--aspect)), calc(100vw - var(--inspector-min) - 3 * var(--pad)));
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  height: calc(100dvh - var(--topbar-h) - var(--banner-h, 0px));
+}
+body.offline .shell { --banner-h: 37px; }
+
+/* ------------------------------------------------------------------ stage */
+.stage {
+  width: calc(max(var(--frame-w), 380px) + var(--pad));
+  display: flex;
+  flex-direction: column;
+  gap: var(--pad);
+  padding: var(--pad);
+  padding-right: 0;
+  min-height: 0;
+}
+.viewport { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.frame {
+  position: relative;
+  width: var(--frame-w);
+  max-height: 100%;
+  aspect-ratio: var(--ar);
+  border-radius: var(--r-xl);
+  background: #000;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--line-strong), var(--shadow);
+  isolation: isolate;
+}
+#video, #fallback { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#fallback { object-fit: contain; }
+.frame-chip {
+  position: absolute;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: var(--fs-label);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.86);
+  background: rgba(10, 10, 12, 0.56);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+#rec-badge { top: 12px; left: 12px; color: #fff; }
+#rec-badge .dot { background: var(--rec); box-shadow: none; animation: blink 1.6s ease-in-out infinite; }
+#format-chip { top: 12px; right: 12px; font-weight: 500; letter-spacing: 0; }
+#sync-chip { bottom: 12px; left: 12px; font-weight: 500; letter-spacing: 0; }
+#sync-chip i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+
+/* empty and waiting states, drawn inside the 9:16 frame so nothing jumps when video starts */
+.empty {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  padding: 28px 24px;
+  overflow: auto;
+  background: var(--surface);
+  color: var(--text);
+}
+.empty-head { display: flex; flex-direction: column; gap: 6px; }
+.empty-icon { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--surface-2); border: 1px solid var(--line); color: var(--text-2); margin-bottom: 8px; }
+.empty-icon svg.i { width: 22px; height: 22px; stroke-width: 1.5; }
+.empty h2 { margin: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+.empty p { margin: 0; color: var(--text-2); }
+.link-steps { display: flex; flex-direction: column; gap: 12px; }
+.link-card { border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.link-card header { display: flex; align-items: center; gap: 8px; font-weight: 650; }
+.link-card .now { display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-small); color: var(--text); line-height: 1.45; padding: 7px 10px; border-radius: var(--r-sm); background: var(--surface-3); }
+.link-card .now .dot { transform: translateY(-1px); }
+.link-card .now .dot.wait { background: var(--text-3); animation: blink 1.6s ease-in-out infinite; }
+.link-card ol { margin: 0; padding: 0; list-style: none; counter-reset: step; display: flex; flex-direction: column; gap: 8px; }
+.link-card li { counter-increment: step; display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; color: var(--text-2); font-size: var(--fs-small); line-height: 1.5; }
+.link-card li::before {
+  content: counter(step);
+  width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: var(--fs-label); font-weight: 650;
+  background: var(--surface-3); color: var(--text);
+}
+.link-card li b { color: var(--text); font-weight: 600; }
+.spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line-strong); border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
+
+/* ------------------------------------------------------------------ transport */
+.transport-wrap { container-type: inline-size; flex: none; }
+.transport {
+  height: var(--transport-h);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 12px 0 10px;
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+#record {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  flex: none;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 2px var(--line-strong);
+  transition: box-shadow 0.2s, background-color 0.2s;
+}
+#record::before {
+  content: "";
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--rec);
+  transition: width 0.2s var(--ease), height 0.2s var(--ease), border-radius 0.2s var(--ease);
+}
+#record:hover:not(:disabled) { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--rec) 55%, transparent); }
+#record:disabled { opacity: 1; }
+#record:disabled::before { background: var(--text-3); opacity: 0.6; }
+#record.active { box-shadow: inset 0 0 0 2px var(--rec); background: var(--rec-weak); }
+#record.active::before { width: 18px; height: 18px; border-radius: 4px; }
+#record:focus-visible { box-shadow: inset 0 0 0 2px var(--line-strong), var(--focus); }
+#record.active:focus-visible { box-shadow: inset 0 0 0 2px var(--rec), var(--focus); }
+#record.active::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: 50%;
+  border: 2px solid var(--rec);
+  animation: pulse 1.8s ease-out infinite;
+  pointer-events: none;
+}
+.rec-info { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+#timer { font: 500 var(--fs-timer)/1 var(--mono); letter-spacing: -0.02em; color: var(--text); transition: color 0.2s; }
+#timer.active { color: var(--rec); }
+#rec-line { font-size: var(--fs-small); color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 1.45em; }
+.transport-actions { display: flex; gap: 6px; flex: none; }
+.transport .btn { height: 40px; }
+.transport .btn kbd { margin-left: 2px; }
+@container (max-width: 470px) { .transport .btn kbd { display: none; } }
+@container (max-width: 440px) {  /* the timer needs the room once Hands and Camera are both there */
+  .transport .btn .btn-label { display: none; }
+  .transport .btn { width: 40px; padding: 0; justify-content: center; }
+}
+
+.notice {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--warn-weak);
+  color: var(--text);
+  font-size: var(--fs-small);
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+}
+.notice svg.i { color: var(--warn); margin-top: 1px; }
+.notice.bad { background: var(--bad-weak); border-color: color-mix(in srgb, var(--bad) 30%, transparent); }
+.notice.bad svg.i { color: var(--bad); }
+
+/* ------------------------------------------------------------------ inspector */
+.inspector {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--pad);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scrollbar-gutter: stable;
+}
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  padding: 14px 16px 16px;
+  min-width: 0;
+}
+.panel-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; min-height: 22px; }
+.panel h2 {
+  margin: 0;
+  font-size: var(--fs-label);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.panel-head .aside { margin-left: auto; font-size: var(--fs-small); color: var(--text-2); display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 12px; }
+.label { font-size: var(--fs-label); color: var(--text-2); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; }
+.big { font-size: var(--fs-num); font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+.unit { font-size: var(--fs-small); color: var(--text-2); font-weight: 500; letter-spacing: 0; margin-left: 3px; }
+
+/* signal chain */
+.chain { container-type: inline-size; }
+.hops { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+.hop {
+  --tone: var(--text-3);
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 12px 10px;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  transition: border-color 0.3s, background-color 0.3s;
+}
+.hop::before { content: ""; position: absolute; left: 12px; right: 12px; top: -1px; height: 2px; border-radius: 0 0 2px 2px; background: var(--tone); opacity: 0.9; transition: background-color 0.3s; }
+.hop:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  right: -11px;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  border-top: 1.5px solid var(--text-3);
+  border-right: 1.5px solid var(--text-3);
+  transform: translateY(-50%) rotate(45deg);
+}
+.hop.ok { --tone: var(--good); }
+.hop.warn { --tone: var(--warn); background: color-mix(in srgb, var(--warn) 7%, var(--surface-2)); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+.hop.bad { --tone: var(--bad); background: color-mix(in srgb, var(--bad) 7%, var(--surface-2)); border-color: color-mix(in srgb, var(--bad) 40%, transparent); }
+.hop.off { --tone: var(--line-strong); }
+.hop-top { display: flex; align-items: center; gap: 6px; color: var(--text-2); font-weight: 600; font-size: var(--fs-small); min-width: 0; }
+.hop-top .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hop-top .state { margin-left: auto; color: var(--tone); display: inline-flex; }
+.hop.off .hop-top .state, .hop.idle .hop-top .state { color: var(--text-3); }
+.hop-value { display: flex; align-items: baseline; white-space: nowrap; min-height: 26px; }
+.hop-value .big { min-width: 2.6ch; }
+.hop.off .big, .hop.idle .big { color: var(--text-3); }
+.hop canvas { width: 100%; height: 28px; display: block; }
+.hop-note { font-size: var(--fs-small); color: var(--text-2); line-height: 1.35; min-height: calc(2 * 1.35em); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.hop.warn .hop-note { color: var(--warn); }
+.hop.bad .hop-note { color: var(--bad); }
+.chain-summary { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); color: var(--text-2); font-size: var(--fs-small); min-height: 1.45em; }
+.chain-summary svg.i { flex: none; }
+.chain-summary.ok svg.i { color: var(--good); }
+.chain-summary.warn { color: var(--text); }
+.chain-summary.warn svg.i { color: var(--warn); }
+.chain-summary.bad { color: var(--text); }
+.chain-summary.bad svg.i { color: var(--bad); }
+@container (max-width: 620px) {
+  .hops { gap: 10px; }
+  .hop { padding: 9px 6px 8px; gap: 3px; align-items: center; text-align: center; }
+  .hop::before { left: 8px; right: 8px; }
+  .hop:not(:last-child)::after { right: -8px; width: 5px; height: 5px; }
+  .hop canvas, .hop-note { display: none; }
+  .hop-top { width: 100%; justify-content: space-between; }
+  .hop-top .name { order: 3; position: absolute; left: 0; right: 0; bottom: 7px; font-size: 10px; font-weight: 600; color: var(--text-2); }
+  .hop { padding-bottom: 24px; }
+  .hop .big { font-size: 17px; min-width: 0; }
+  .hop .unit { display: none; }
+}
+
+/* stat rows and charts */
+.stat-row { display: flex; align-items: flex-end; gap: 12px; }
+.stat { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.chart { width: 100%; height: 56px; display: block; }
+.chart.tall { height: 64px; }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 12px 0 0; font-size: var(--fs-body); }
+.kv dt { color: var(--text-2); }
+.kv dd { margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: var(--fs-label);
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  background: var(--surface-3);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.tag.good { background: var(--good-weak); color: var(--good); }
+.tag.warn { background: var(--warn-weak); color: var(--warn); }
+.tag.bad { background: var(--bad-weak); color: var(--bad); }
+.tag.rec { background: var(--rec-weak); color: var(--rec); }
+.tag.accent { background: var(--accent-weak); color: var(--accent); }
+
+/* hands panel */
+.hand-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.hand {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px; border-radius: var(--r-md);
+  background: var(--surface-2); border: 1px solid var(--line);
+  transition: opacity 0.25s;
+}
+.hand.absent { opacity: 0.55; }
+.hand-badge { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: var(--fs-small); color: #0b0b0e; flex: none; }
+.hand.absent .hand-badge { background: transparent !important; color: var(--text-3); box-shadow: inset 0 0 0 1.5px var(--line-strong); }
+.hand-text { flex: 1; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; column-gap: 8px; min-width: 0; line-height: 1.3; }
+.hand-text > span { white-space: nowrap; font-weight: 550; }
+.hand-text small { color: var(--text-2); font-size: var(--fs-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.meter { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: var(--surface-3); overflow: hidden; margin-top: 6px; }
+.meter i { display: block; height: 100%; border-radius: 2px; background: currentColor; transition: width 0.3s var(--ease); }
+
+/* virtual camera */
+.vcam { container-type: inline-size; }
+.vcam .panel-head .aside { gap: 10px; }
+.vcam-body { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.vcam-preview {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--stage);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+#vcam-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.vcam-idle {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  background: var(--surface-2);
+}
+.vcam-idle svg.i { color: var(--text-3); }
+.vcam-preview .frame-chip { right: 8px; bottom: 8px; height: 22px; font-weight: 500; letter-spacing: 0; }
+.vcam-controls { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.field-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.field-head .faint, .field-row .faint { font-size: var(--fs-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.field-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.field-row > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.slider-ends { display: flex; justify-content: space-between; font-size: var(--fs-label); margin-top: -4px; }
+.vcam .kv { margin: 0; padding-top: 12px; border-top: 1px solid var(--line); font-size: var(--fs-small); }
+.vcam .notice { margin-top: 12px; }
+.vcam .notice b { display: block; font-weight: 600; margin-bottom: 2px; }
+.vcam .notice span { color: var(--text-2); }
+@container (max-width: 520px) {
+  .vcam-body { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* motion */
+.motion-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px 20px; }
+.imu { min-width: 0; }
+.imu-head { display: flex; align-items: baseline; gap: 6px; margin-bottom: 6px; }
+.imu-head .label { white-space: nowrap; }
+.imu-head .faint { font-size: var(--fs-label); }
+.imu-vals { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin-top: 6px; font-size: var(--fs-small); }
+.imu-vals span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; color: var(--text); }
+.imu-vals span i { width: 8px; height: 2px; border-radius: 1px; display: inline-block; flex: none; }
+.imu-vals span b { font-weight: 500; color: var(--text-3); font-size: var(--fs-label); }
+
+/* glasses */
+.glasses-top { display: flex; align-items: center; gap: 14px; }
+.battery { position: relative; width: 56px; height: 56px; flex: none; }
+.battery svg { width: 56px; height: 56px; transform: rotate(-90deg); }
+.battery circle { fill: none; stroke-width: 5; }
+.battery .track { stroke: var(--surface-3); }
+.battery .level { stroke: var(--good); stroke-linecap: round; transition: stroke-dashoffset 0.6s var(--ease), stroke 0.3s; }
+.battery.warn .level { stroke: var(--warn); }
+.battery.bad .level { stroke: var(--bad); }
+.battery.unknown .level { stroke: transparent; }
+.battery span { position: absolute; inset: 0; display: grid; place-items: center; font-weight: 650; font-size: var(--fs-body); }
+.chips { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 12px; }
+.chip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 7px 9px; border-radius: var(--r-sm);
+  background: var(--surface-2); border: 1px solid var(--line);
+  min-width: 0; font-size: var(--fs-small);
+}
+.chip svg.i { color: var(--text-2); }
+.chip.warn svg.i { color: var(--warn); }
+.chip.bad svg.i { color: var(--bad); }
+.chip .chip-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.chip .chip-text small { color: var(--text-2); font-size: var(--fs-label); }
+.chip .chip-text span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inputs { margin: 10px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* recordings */
+.folder { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.folder code { font: var(--fs-small) var(--mono); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; min-width: 0; }
+.rec-table { width: 100%; border-collapse: collapse; }
+.rec-table th { text-align: left; font-size: var(--fs-label); font-weight: 600; color: var(--text-2); letter-spacing: 0.04em; text-transform: uppercase; padding: 0 10px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.rec-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.rec-table tr:last-child td { border-bottom: 0; }
+.rec-table tbody tr { transition: background-color 0.15s; }
+.rec-table tbody tr:hover { background: var(--surface-2); }
+.rec-table .r { text-align: right; }
+.rec-table th:first-child, .rec-table td:first-child { padding-left: 4px; }
+.rec-name { font-weight: 550; }
+.rec-empty { padding: 18px 4px 6px; color: var(--text-2); display: flex; align-items: center; gap: 10px; }
+.show-all { margin-top: 10px; }
+
+/* toasts */
+.toasts { position: fixed; right: 20px; bottom: 20px; z-index: 50; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none; }
+.toast {
+  pointer-events: auto;
+  display: flex; align-items: flex-start; gap: 10px;
+  max-width: min(420px, calc(100vw - 32px));
+  padding: 11px 14px;
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  color: var(--text);
+  border: 1px solid var(--line-strong);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  animation: toast-in 0.22s var(--ease);
+}
+.toast.good svg.i { color: var(--good); }
+.toast.bad svg.i { color: var(--bad); }
+.toast.leaving { opacity: 0; transform: translateY(6px); transition: opacity 0.2s, transform 0.2s; }
+
+/* pairing dialog */
+dialog {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-xl);
+  background: var(--surface);
+  color: var(--text);
+  padding: 22px 24px 18px;
+  width: min(400px, calc(100vw - 32px));
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+dialog::backdrop { background: rgba(5, 5, 8, 0.6); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+dialog h2 { margin: 0 0 6px; font-size: 17px; font-weight: 650; }
+dialog p { margin: 8px 0; color: var(--text-2); }
+dialog p strong { color: var(--text); font-weight: 600; }
+#qr { display: block; width: 260px; max-width: 100%; height: auto; margin: 16px auto; background: #fff; image-rendering: pixelated; border-radius: 12px; padding: 10px; }
+.dialog-actions { display: flex; justify-content: flex-end; margin-top: 14px; }
+.callout { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-small); color: var(--text-2); }
+.callout svg.i { color: var(--warn); margin-top: 1px; }
+
+@keyframes pulse { 0% { transform: scale(1); opacity: 0.8; } 100% { transform: scale(1.35); opacity: 0; } }
+@keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* ------------------------------------------------------------------ narrow: stage on top, inspector below */
+@media (max-width: 899px), (max-height: 540px) {
+  body { overflow: auto; height: auto; }
+  html { height: auto; }
+  .topbar { position: sticky; top: 0; z-index: 20; padding: 0 12px; gap: 10px; }
+  .brand span, .shortcuts, .topbar .divider { display: none; }
+  body { overflow-x: hidden; }
+  .topbar { overflow: hidden; }
+  body.recording .brand b, #link-extra { display: none; }
+  #rec-pill { flex: none; }
+  .shell { display: block; height: auto; --frame-w: min(calc(100vw - 2 * var(--pad)), calc((100dvh - var(--topbar-h) - 120px) * var(--aspect)), 560px); }
+  .stage { width: auto; padding: var(--pad) var(--pad) 0; }
+  .viewport { flex: none; }
+  .frame { max-height: none; }
+  .transport {
+    position: fixed; z-index: 30; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom));
+    height: 68px; border-radius: var(--r-xl);
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    border-color: var(--line-strong);
+  }
+  .transport-wrap { container-type: normal; }  /* containment would pin the fixed bar to the wrapper */
+  #record { width: 50px; height: 50px; }
+  .transport .btn kbd, .transport .btn .btn-label { display: none; }
+  .transport .btn { width: 40px; padding: 0; justify-content: center; }
+  .inspector { overflow: visible; padding: var(--pad) var(--pad) calc(96px + env(safe-area-inset-bottom)); }
+  .toasts { left: 12px; right: 12px; bottom: calc(88px + env(safe-area-inset-bottom)); align-items: stretch; }
+  #rec-list { overflow-x: auto; }
+  .rec-table thead { display: none; }
+  .rec-table, .rec-table tbody { display: block; }
+  .rec-table tr { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+  .rec-table tr:last-child { border-bottom: 0; }
+  .rec-table td { display: block; padding: 0; border: 0; font-size: var(--fs-small); color: var(--text-2); }
+  .rec-table td.rec-name { flex: 1 1 50%; order: 0; font-size: var(--fs-body); color: var(--text); padding: 0; }
+  .rec-table td.state { order: 1; }
+  .rec-table td.frames::after { content: "\2009frames"; }
+  .rec-table td.meta { order: 2; }
+  .rec-table td.meta + td.meta:not(:nth-child(3))::before { content: "·"; margin-right: 6px; color: var(--text-3); }
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-glasses" viewBox="0 0 24 24"><circle cx="6.5" cy="14" r="3.5"/><circle cx="17.5" cy="14" r="3.5"/><path d="M10 14c.6-.8 1.3-1.2 2-1.2s1.4.4 2 1.2M3 14 4.6 7.5c.2-.9 1-1.5 1.9-1.5M21 14l-1.6-6.5c-.2-.9-1-1.5-1.9-1.5"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18.5h3"/></symbol>
+    <symbol id="i-computer" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12.5" rx="2"/><path d="M8.5 20.5h7M12 16.5v4"/></symbol>
+    <symbol id="i-decode" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2"/><path d="M7.5 5v14M16.5 5v14M3.5 9.5h4M3.5 14.5h4M16.5 9.5h4M16.5 14.5h4"/></symbol>
+    <symbol id="i-hand" viewBox="0 0 24 24"><circle cx="12" cy="19" r="1.6"/><circle cx="6" cy="9" r="1.3"/><circle cx="10" cy="5" r="1.3"/><circle cx="14.5" cy="5.5" r="1.3"/><circle cx="18.5" cy="9" r="1.3"/><path d="M12 17.4 6.6 10.2M12 17.4l-1.7-11M12 17.4l2.3-10.6M12 17.4l5.7-7.4"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12.3 2.7 2.7L16 9.6"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 4.2 2.8 17.5A2 2 0 0 0 4.5 20.5h15a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0Z"/><path d="M12 9.5v4.2M12 17h.01"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M8.5 12h7"/></symbol>
+    <symbol id="i-qr" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><path d="M14 14h2v2h-2zM18 14h2M14 18v2M18 18h2v2"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 0 1 2-2h3.6l2 2.2h7.4a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2Z"/></symbol>
+    <symbol id="i-worn" viewBox="0 0 24 24"><circle cx="12" cy="8.5" r="4"/><path d="M4.5 20.5c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5"/></symbol>
+    <symbol id="i-hinge" viewBox="0 0 24 24"><path d="M4 18h9.5M13.5 18 19.5 7"/><circle cx="13.5" cy="18" r="1.4"/></symbol>
+    <symbol id="i-thermo" viewBox="0 0 24 24"><path d="M10 13.5V5a2 2 0 0 1 4 0v8.5a4 4 0 1 1-4 0Z"/><path d="M12 9v6.5"/></symbol>
+    <symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></symbol>
+    <symbol id="i-usb" viewBox="0 0 24 24"><path d="M12 3v15M12 18a2 2 0 1 0 0 .01M12 7l-2.5-2.5M12 7l2.5-2.5M12 13l-4.5-2.5V8M12 15.5l4.5-2.5v-2.5"/><rect x="15.3" y="8" width="2.4" height="2.4" rx=".4"/><circle cx="7.5" cy="7.2" r="1.2"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 9a14 14 0 0 1 19 0M5.5 12.5a9.5 9.5 0 0 1 13 0M8.6 15.8a5 5 0 0 1 6.8 0"/><circle cx="12" cy="19" r="1"/></symbol>
+    <symbol id="i-terminal" viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2"/><path d="m7 9.5 3 2.5-3 2.5M12.5 15h4.5"/></symbol>
+    <symbol id="i-signal" viewBox="0 0 24 24"><path d="M3 12h4l2.5-6 5 12L17 12h4"/></symbol>
+    <symbol id="i-cloud-off" viewBox="0 0 24 24"><path d="M3 3l18 18M8.5 6.5A6 6 0 0 1 17.6 10 4 4 0 0 1 20 17M17 19H7a4.5 4.5 0 0 1-1.4-8.8"/></symbol>
+    <symbol id="i-camera" viewBox="0 0 24 24"><rect x="2.5" y="6" width="13.5" height="12" rx="2.5"/><path d="m16 10.4 4.3-2.6a.8.8 0 0 1 1.2.7v7a.8.8 0 0 1-1.2.7L16 13.6"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="m10 9.2 5 2.8-5 2.8z"/></symbol>
+  </defs>
+</svg>
+
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-mark"><svg class="i"><use href="#i-glasses"/></svg></div>
+    <b>GlassesData</b><span>Receiver</span>
+  </div>
+  <div class="divider"></div>
+  <div class="pill" id="link-pill" role="status" aria-live="polite">
+    <span class="dot" id="link-dot"></span><strong id="link-name">Connecting…</strong><span id="link-extra"></span>
+  </div>
+  <div class="spacer"></div>
+  <div class="pill" id="rec-pill" hidden><span class="dot rec"></span><span>REC</span><span class="num" id="rec-pill-time">00:00:00</span></div>
+  <div class="shortcuts" aria-label="Keyboard shortcuts">
+    <span><kbd>R</kbd> Record</span><span><kbd>H</kbd> Hands</span><span id="shortcut-vcam" hidden><kbd>V</kbd> Camera</span><span id="shortcut-pair" hidden><kbd>P</kbd> Pair</span>
+  </div>
+</header>
+<div id="banner" role="alert" hidden><svg class="i"><use href="#i-cloud-off"/></svg>Lost contact with the receiver. Is it still running? Retrying…</div>
+
+<main class="shell">
+  <section class="stage" aria-label="Live video">
+    <div class="viewport">
+      <div class="frame" id="frame">
+        <canvas id="video" aria-label="Live video from the glasses, with the hand skeleton" role="img"></canvas>
+        <img id="fallback" alt="Live video from the glasses, with the hand skeleton" hidden>
+        <div class="frame-chip" id="rec-badge" hidden><span class="dot"></span>REC</div>
+        <div class="frame-chip num" id="format-chip" hidden></div>
+        <div class="frame-chip" id="sync-chip" hidden></div>
+        <div class="empty" id="empty">
+          <div class="empty-head">
+            <div class="empty-icon" id="empty-icon"><div class="spinner"></div></div>
+            <h2 id="empty-title">Connecting to the receiver…</h2>
+            <p id="empty-text"></p>
+          </div>
+          <div class="link-steps" id="empty-steps"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="transport-wrap"><div class="transport" aria-label="Recording controls">
+      <button id="record" type="button" aria-label="Start recording (R)" disabled></button>
+      <div class="rec-info">
+        <div id="timer" class="num" role="timer" aria-label="Recording time">00:00:00</div>
+        <div id="rec-line">Not connected</div>
+      </div>
+      <div class="transport-actions">
+        <button class="btn" id="hands-button" type="button" aria-pressed="false" disabled title="Hand tracking (H)">
+          <svg class="i"><use href="#i-hand"/></svg><span class="btn-label">Hands</span><kbd>H</kbd>
+        </button>
+        <button class="btn" id="vcam-button" type="button" aria-pressed="false" hidden title="Virtual camera (V)">
+          <svg class="i"><use href="#i-camera"/></svg><span class="btn-label">Camera</span><kbd>V</kbd>
+        </button>
+        <button class="btn" id="pair-button" type="button" hidden title="Pair an iPhone over Wi-Fi (P)">
+          <svg class="i"><use href="#i-qr"/></svg><span class="btn-label">Pair</span><kbd>P</kbd>
+        </button>
+      </div>
+    </div></div>
+  </section>
+
+  <aside class="inspector" aria-label="Status">
+    <div class="notice" id="rec-notice" role="status" hidden><span class="sr-only">Recording: </span><svg class="i"><use href="#i-alert"/></svg><span id="rec-notice-text"></span></div>
+    <section class="panel chain" aria-labelledby="h-chain">
+      <div class="panel-head">
+        <h2 id="h-chain">Signal chain</h2>
+        <span class="aside" id="chain-aside"></span>
+      </div>
+      <div class="hops" id="hops"></div>
+      <div class="chain-summary" id="chain-summary" role="status"><svg class="i"><use href="#i-minus"/></svg><span>Waiting for data…</span></div>
+    </section>
+
+    <section class="panel vcam" id="vcam-panel" aria-labelledby="h-vcam" hidden>
+      <div class="panel-head">
+        <h2 id="h-vcam">Virtual camera</h2>
+        <span class="aside"><span class="tag" id="vcam-tag">Off</span>
+          <button class="switch" id="vcam-switch" type="button" role="switch" aria-checked="false" aria-label="Virtual camera" title="Virtual camera (V)"></button>
+        </span>
+      </div>
+      <div class="vcam-body">
+        <div class="vcam-preview">
+          <canvas id="vcam-canvas" role="img" aria-label="What the virtual camera is sending"></canvas>
+          <div class="vcam-idle" id="vcam-idle"><svg class="i lg"><use href="#i-camera"/></svg><span id="vcam-idle-text">Off</span></div>
+          <span class="frame-chip num" id="vcam-chip"></span>
+        </div>
+        <div class="vcam-controls">
+          <div class="field">
+            <div class="field-head"><span class="label" id="vcam-mode-label">Picture</span><span class="faint" id="vcam-mode-note"></span></div>
+            <div class="segmented" role="group" aria-labelledby="vcam-mode-label">
+              <button type="button" data-mode="fit" aria-pressed="true">Fit</button>
+              <button type="button" data-mode="fill" aria-pressed="false">Fill</button>
+            </div>
+          </div>
+          <div class="field" id="vcam-position-field" hidden>
+            <div class="field-head"><label class="label" for="vcam-position">Band</label><span class="faint num" id="vcam-position-value"></span></div>
+            <input class="slider" id="vcam-position" type="range" min="0" max="100" step="1" value="50" aria-describedby="vcam-position-help">
+            <div class="slider-ends faint" id="vcam-position-help"><span>Top of the frame</span><span>Bottom</span></div>
+          </div>
+          <div class="field-row">
+            <div><span class="label" id="vcam-overlay-label">Hand skeleton</span><span class="faint" id="vcam-overlay-note"></span></div>
+            <button class="switch" id="vcam-overlay" type="button" role="switch" aria-checked="false" aria-labelledby="vcam-overlay-label"></button>
+          </div>
+          <dl class="kv" id="vcam-kv"></dl>
+        </div>
+      </div>
+      <div class="notice" id="vcam-notice" role="status" hidden><svg class="i"><use href="#i-alert"/></svg><div><b id="vcam-notice-title"></b><span id="vcam-notice-text"></span></div></div>
+    </section>
+
+    <div class="cards">
+      <section class="panel" aria-labelledby="h-link">
+        <div class="panel-head"><h2 id="h-link">Link</h2><span class="aside" id="link-kind"></span></div>
+        <div class="stat-row">
+          <div class="stat"><span class="label">Phone → computer delay</span><span><span class="big num" id="delay-value">–</span><span class="unit">ms</span></span></div>
+        </div>
+        <canvas class="chart" id="delay-chart" aria-hidden="true"></canvas>
+        <dl class="kv" id="link-kv"></dl>
+      </section>
+
+      <section class="panel" aria-labelledby="h-hands">
+        <div class="panel-head"><h2 id="h-hands">Hands</h2><span class="aside" id="hands-state"></span></div>
+        <div class="stat-row">
+          <div class="stat"><span class="label">Tracked</span><span><span class="big num" id="hands-fps">–</span><span class="unit">fps</span></span></div>
+          <div class="stat"><span class="label">Per frame</span><span><span class="big num" id="hands-ms">–</span><span class="unit">ms</span></span></div>
+        </div>
+        <div class="hand-list" id="hand-list"></div>
+        <dl class="kv" id="hands-kv"></dl>
+      </section>
+
+      <section class="panel" aria-labelledby="h-glasses">
+        <div class="panel-head"><h2 id="h-glasses">Glasses</h2><span class="aside" id="glasses-aside"></span></div>
+        <div class="glasses-top">
+          <div class="battery unknown" id="battery" role="img" aria-label="Battery unknown">
+            <svg viewBox="0 0 56 56" aria-hidden="true"><circle class="track" cx="28" cy="28" r="23"/><circle class="level" id="battery-level" cx="28" cy="28" r="23" stroke-dasharray="144.5" stroke-dashoffset="144.5"/></svg>
+            <span class="num" id="battery-text">–</span>
+          </div>
+          <div class="stat"><span class="label">Battery</span><span id="battery-detail" class="muted">No data from the glasses yet</span></div>
+        </div>
+        <div class="chips" id="chips"></div>
+        <ul class="inputs" id="inputs" aria-label="Recent inputs"></ul>
+      </section>
+    </div>
+
+    <section class="panel" aria-labelledby="h-motion">
+      <div class="panel-head"><h2 id="h-motion">Motion</h2><span class="aside" id="motion-aside"></span></div>
+      <div class="motion-grid" id="motion-grid"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="h-recordings">
+      <div class="panel-head">
+        <h2 id="h-recordings">Recordings</h2>
+        <span class="aside folder"><svg class="i sm"><use href="#i-folder"/></svg><code id="rec-folder" title=""></code>
+          <button class="btn ghost small" id="copy-folder" type="button" title="Copy the folder path"><svg class="i sm"><use href="#i-copy"/></svg><span class="sr-only">Copy the folder path</span></button>
+        </span>
+      </div>
+      <div id="rec-list"><div class="rec-empty"><div class="spinner"></div>Loading…</div></div>
+    </section>
+  </aside>
+</main>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<dialog id="pair" aria-labelledby="pair-title">
+  <h2 id="pair-title">Pair over Wi-Fi</h2>
+  <div id="pair-on">
+    <p>In GlassesData on the iPhone: <strong>Computer card › Pair over Wi-Fi</strong>, then scan this code.</p>
+    <img id="qr" alt="Wi-Fi pairing QR code" width="300" height="300">
+    <p class="callout"><svg class="i sm"><use href="#i-alert"/></svg><span>Treat this code like a password: anyone who scans it can connect to this receiver.</span></p>
+    <p id="pair-status" role="status"></p>
+  </div>
+  <div id="pair-off" hidden>
+    <p>Wi-Fi is off. Restart the receiver with <code>--wifi</code> to pair an iPhone over Wi-Fi.</p>
+  </div>
+  <div class="dialog-actions"><button class="btn" id="pair-close" type="button">Close</button></div>
+</dialog>
+
+<script>
+"use strict";
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const POLL_MS = 250;
+  const LIST_MS = 5000;
+  const CHART_SECONDS = 20;
+  const HISTORY_KEEP_S = 32;
+  const HAND_BONES = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12],
+    [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [0, 17], [17, 18], [18, 19], [19, 20]];
+  const PALM = [0, 1, 5, 9, 13, 17];
+  const TIPS = [4, 8, 12, 16, 20];
+
+  let last = null;          // the latest status
+  let busy = false;         // an action is in flight
+  let wasRecording = null;
+  let pairShownAtStart = false;
+  let qrRequested = false;
+  let history = [];         // rows as objects, oldest first
+  let historyFields = null;
+  let lastFrameInfo = null; // X-Hands of the frame on screen
+  let showAllRecordings = false;
+  let recordings = [];
+
+  // ---------------------------------------------------------------- small helpers
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined && text !== null) node.textContent = text;
+    return node;
+  }
+  function icon(name, cls) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "i" + (cls ? " " + cls : ""));
+    svg.setAttribute("aria-hidden", "true");
+    const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+    use.setAttribute("href", "#i-" + name);
+    svg.appendChild(use);
+    return svg;
+  }
+  function setText(node, text) { if (node.textContent !== text) node.textContent = text; }
+  function setClass(node, cls) { if (node.className !== cls) node.className = cls; }
+  function isNum(v) { return typeof v === "number" && isFinite(v); }
+  function fixed(v, digits) { return isNum(v) ? v.toFixed(digits) : "–"; }
+  function grouped(v) { return isNum(v) ? Math.round(v).toLocaleString("en-US") : "–"; }
+  function plural(n, word) { return n + " " + word + (n === 1 ? "" : "s"); }
+  function clock(seconds) {
+    const total = Math.max(0, Math.floor(seconds || 0));
+    const h = Math.floor(total / 3600), m = Math.floor((total % 3600) / 60), s = total % 60;
+    return [h, m, s].map((n) => String(n).padStart(2, "0")).join(":");
+  }
+  function size(bytes) {
+    if (!isNum(bytes)) return "–";
+    const units = ["B", "KB", "MB", "GB", "TB"];
+    let value = bytes, unit = 0;
+    while (value >= 1000 && unit < units.length - 1) { value /= 1000; unit += 1; }
+    return (unit === 0 ? value : value.toFixed(value < 10 ? 1 : 0)) + " " + units[unit];
+  }
+  function words(value) {  // "notCharging" -> "Not charging"
+    if (value === null || value === undefined || value === "") return "–";
+    const text = String(value).replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").toLowerCase();
+    return text.charAt(0).toUpperCase() + text.slice(1);
+  }
+  function sentence(text) { text = String(text || "").trim(); return text ? text.charAt(0).toUpperCase() + text.slice(1) : ""; }
+  function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+  let palette = {};
+  function readPalette() {
+    for (const name of ["good", "warn", "bad", "text-3", "chart-line", "chart-grid", "axis-x", "axis-y", "axis-z", "hand-left", "hand-right", "accent"]) {
+      palette[name] = cssVar("--" + name);
+    }
+  }
+  readPalette();
+  window.matchMedia("(prefers-color-scheme: light)").addEventListener("change", () => { readPalette(); drawCharts(); drawFrame(); });
+
+  // ---------------------------------------------------------------- requests and toasts
+
+  async function getJson(path) {
+    const response = await fetch(path, { cache: "no-store", credentials: "same-origin" });
+    if (!response.ok) throw new Error("HTTP " + response.status);
+    return response.json();
+  }
+  async function post(path, payload) {
+    const headers = { "X-GlassesData": "1" };
+    if (payload !== undefined) headers["Content-Type"] = "application/json";
+    const response = await fetch(path, { method: "POST", headers, credentials: "same-origin", body: payload === undefined ? undefined : JSON.stringify(payload) });
+    let body = {};
+    try { body = await response.json(); } catch (error) { body = { ok: false, message: "HTTP " + response.status }; }
+    return body;
+  }
+  function toast(text, kind) {
+    const node = el("div", "toast " + (kind || ""));
+    node.setAttribute("role", kind === "bad" ? "alert" : "status");
+    node.appendChild(icon(kind === "bad" ? "x" : kind === "good" ? "check" : "minus"));
+    node.appendChild(el("span", null, text));
+    $("toasts").appendChild(node);
+    while ($("toasts").children.length > 3) $("toasts").firstChild.remove();
+    setTimeout(() => {
+      node.classList.add("leaving");
+      setTimeout(() => node.remove(), 220);
+    }, kind === "bad" ? 7000 : 4000);
+  }
+
+  // ---------------------------------------------------------------- history (for the charts)
+
+  function addHistory(data) {
+    if (!data || !Array.isArray(data.rows)) return;
+    historyFields = data.fields;
+    for (const row of data.rows) {
+      const item = {};
+      data.fields.forEach((name, i) => { item[name] = row[i]; });
+      if (!history.length || item.t > history[history.length - 1].t) history.push(item);
+    }
+    const cutoff = (history.length ? history[history.length - 1].t : 0) - HISTORY_KEEP_S;
+    while (history.length && history[0].t < cutoff) history.shift();
+  }
+  function lastT() { return history.length ? history[history.length - 1].t : 0; }
+  function series(field) { return history.map((row) => [row.t, row[field]]); }
+  function recentAverage(field, seconds) {
+    const cutoff = lastT() - seconds;
+    let sum = 0, count = 0;
+    for (let i = history.length - 1; i >= 0 && history[i].t >= cutoff; i--) {
+      if (isNum(history[i][field])) { sum += history[i][field]; count++; }
+    }
+    return count ? sum / count : null;
+  }
+  function counterDelta(field, seconds) {  // growth of a counter over the last `seconds` (counters reset on reconnect)
+    const cutoff = lastT() - seconds;
+    let newest = null, oldest = null;
+    for (let i = history.length - 1; i >= 0 && history[i].t >= cutoff; i--) {
+      const v = history[i][field];
+      if (!isNum(v)) continue;
+      if (newest === null) newest = v;
+      oldest = v;
+    }
+    if (newest === null) return null;
+    return newest >= oldest ? newest - oldest : newest;
+  }
+
+  // ---------------------------------------------------------------- charts (canvas, no library)
+
+  function fitCanvas(canvas) {
+    const ratio = window.devicePixelRatio || 1;
+    const width = canvas.clientWidth, height = canvas.clientHeight;
+    if (!width || !height) return null;
+    const w = Math.round(width * ratio), h = Math.round(height * ratio);
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, width, height);
+    return { ctx, width, height };
+  }
+
+  // lines: [{points: [[t, v]], color, fill}]; opts: {min, max, target, grid}
+  function sparkline(canvas, lines, opts) {
+    const area = fitCanvas(canvas);
+    if (!area) return;
+    const { ctx, width, height } = area;
+    const end = lastT(), start = end - CHART_SECONDS;
+    let min = opts.min, max = opts.max;
+    if (min === undefined || max === undefined) {
+      let lo = Infinity, hi = -Infinity;
+      for (const line of lines) for (const [t, v] of line.points) if (t >= start && isNum(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+      if (!isFinite(lo)) { lo = 0; hi = 1; }
+      const pad = Math.max((hi - lo) * 0.15, opts.minSpan || 0.5);
+      if (min === undefined) min = lo - pad;
+      if (max === undefined) max = hi + pad;
+    }
+    if (max <= min) max = min + 1;
+    const top = 2, bottom = height - 2;
+    const x = (t) => ((t - start) / CHART_SECONDS) * width;
+    const y = (v) => bottom - ((Math.min(Math.max(v, min), max) - min) / (max - min)) * (bottom - top);
+    if (opts.zero && min < 0 && max > 0) {
+      ctx.strokeStyle = palette["chart-grid"]; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, Math.round(y(0)) + 0.5); ctx.lineTo(width, Math.round(y(0)) + 0.5); ctx.stroke();
+    }
+    if (isNum(opts.target)) {
+      ctx.save();
+      ctx.strokeStyle = palette["text-3"]; ctx.globalAlpha = 0.55; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+      const ty = Math.round(y(opts.target)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(0, ty); ctx.lineTo(width, ty); ctx.stroke();
+      ctx.restore();
+    }
+    for (const line of lines) {
+      const runs = [];
+      let run = [];
+      for (const [t, v] of line.points) {
+        if (t < start - 1) continue;
+        if (isNum(v)) run.push([x(t), y(v)]); else if (run.length) { runs.push(run); run = []; }
+      }
+      if (run.length) runs.push(run);
+      ctx.lineJoin = "round"; ctx.lineCap = "round";
+      for (const pts of runs) {
+        if (line.fill && pts.length > 1) {
+          const gradient = ctx.createLinearGradient(0, top, 0, bottom);
+          gradient.addColorStop(0, withAlpha(line.color, 0.22));
+          gradient.addColorStop(1, withAlpha(line.color, 0));
+          ctx.fillStyle = gradient;
+          ctx.beginPath(); ctx.moveTo(pts[0][0], bottom);
+          for (const [px, py] of pts) ctx.lineTo(px, py);
+          ctx.lineTo(pts[pts.length - 1][0], bottom); ctx.closePath(); ctx.fill();
+        }
+        ctx.strokeStyle = line.color; ctx.lineWidth = line.width || 1.5;
+        ctx.beginPath();
+        pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+        if (pts.length === 1) ctx.lineTo(pts[0][0] + 0.5, pts[0][1]);
+        ctx.stroke();
+      }
+    }
+  }
+  function withAlpha(color, alpha) {
+    const m = /^#([0-9a-f]{6})$/i.exec(color);
+    if (!m) return color;
+    const n = parseInt(m[1], 16);
+    return "rgba(" + (n >> 16) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + alpha + ")";
+  }
+
+  // ---------------------------------------------------------------- signal chain
+
+  const HOPS = [
+    { key: "glasses", name: "Glasses", icon: "glasses", field: "glasses_fps", tip: "Frames the glasses delivered to the iPhone" },
+    { key: "phone", name: "iPhone", icon: "phone", field: "sent_fps", tip: "Frames the iPhone sent on" },
+    { key: "computer", name: "Computer", icon: "computer", field: "received_fps", tip: "Frames that reached this computer" },
+    { key: "decode", name: "Decode", icon: "decode", field: "decoded_fps", tip: "Frames decoded for display" },
+    { key: "hands", name: "Hands", icon: "hand", field: "hands_fps", tip: "Frames the hand tracker processed" },
+  ];
+  const hopNodes = {};
+  function buildHops() {
+    const box = $("hops");
+    for (const hop of HOPS) {
+      const node = el("div", "hop idle");
+      node.title = hop.tip;
+      const top = el("div", "hop-top");
+      const nameIcon = icon(hop.icon, "sm name-icon");
+      top.appendChild(nameIcon);
+      top.appendChild(el("span", "name", hop.name));
+      const state = el("span", "state");
+      top.appendChild(state);
+      const value = el("div", "hop-value");
+      const big = el("span", "big num", "–");
+      const unit = el("span", "unit", "");
+      value.appendChild(big); value.appendChild(unit);
+      const chart = el("canvas");
+      chart.setAttribute("aria-hidden", "true");
+      const note = el("div", "hop-note", "");
+      node.append(top, value, chart, note);
+      box.appendChild(node);
+      hopNodes[hop.key] = { node, state, big, unit, chart, note, stateName: "" };
+    }
+  }
+
+  function ratioState(value, reference, warnBelow, badBelow) {
+    if (!isNum(value) || !isNum(reference) || reference <= 0) return "ok";
+    const ratio = value / reference;
+    return ratio < badBelow ? "bad" : ratio < warnBelow ? "warn" : "ok";
+  }
+  function worse(a, b) {
+    const rank = { off: 0, idle: 0, ok: 1, warn: 2, bad: 3 };
+    return rank[b] > rank[a] ? b : a;
+  }
+
+  // Each hop: {state: ok|warn|bad|idle|off, value, note}
+  function assessChain(st) {
+    const v = st.video, h = st.hands;
+    const expected = v.format ? v.format.fps : null;
+    const result = {};
+    const idleNotes = st.link.connected
+      ? { glasses: "No video yet: start the glasses preview", phone: "Connected", decode: "No video yet", hands: "No video yet" }
+      : { glasses: "Waiting for the iPhone", phone: "Not connected", computer: "No iPhone connected", decode: "No video", hands: "No video" };
+    if (!st.link.connected) {
+      for (const hop of HOPS) result[hop.key] = { state: "idle", value: null, note: idleNotes[hop.key] };
+      if (!h.available || !h.enabled) result.hands = { state: "off", value: null, note: h.error ? "Unavailable" : "Off" };
+      return result;
+    }
+    if (!v.format) {
+      for (const hop of HOPS) result[hop.key] = { state: "idle", value: null, note: idleNotes[hop.key] };
+      result.computer = { state: "ok", value: null, note: "Connected · " + fixed(v.rtt_ms, 1) + " ms round trip" };
+      if (!h.available || !h.enabled) result.hands = { state: "off", value: null, note: h.error ? "Unavailable" : "Off" };
+      return result;
+    }
+    // Decisions use ~2 s averages so a single noisy second does not flip a hop.
+    const avg = (field, now) => { const a = recentAverage(field, 2); return isNum(a) ? a : now; };
+
+    // glasses -> iPhone
+    const glasses = avg("glasses_fps", v.glasses_fps);
+    if (!isNum(v.glasses_fps)) result.glasses = { state: "idle", value: null, note: "Waiting for the iPhone's counters" };
+    else if (v.glasses_fps === 0) result.glasses = { state: "bad", value: 0, note: "No frames from the glasses" };
+    else {
+      const state = ratioState(glasses, expected, 0.9, 0.6);
+      result.glasses = { state, value: v.glasses_fps, note: state === "ok" ? "Steady" : "Delivering " + fixed(glasses, 0) + " of " + expected + " fps" };
+    }
+
+    // iPhone -> computer (what it sent on)
+    const sent = avg("sent_fps", v.phone_sent_fps);
+    const drops = counterDelta("dropped_frames", 10);
+    if (!isNum(v.phone_sent_fps)) result.phone = { state: "idle", value: null, note: "Waiting for the iPhone's counters" };
+    else {
+      let state = ratioState(sent, isNum(glasses) && glasses > 0 ? glasses : expected, 0.9, 0.6);
+      let note = "No dropped frames";
+      if (drops > 0) { state = worse(state, "warn"); note = "Phone dropped " + plural(drops, "frame") + " in 10 s"; }
+      else if (state !== "ok") note = "Sending " + fixed(sent, 0) + " of " + fixed(glasses, 0) + " fps";
+      else if (isNum(v.phone_dropped_frames) && v.phone_dropped_frames > 0) note = "No drops now · " + grouped(v.phone_dropped_frames) + " earlier";
+      result.phone = { state, value: v.phone_sent_fps, note };
+    }
+
+    // computer: received
+    const received = avg("received_fps", v.received_fps);
+    const delay = v.delay_ms;
+    {
+      const reference = isNum(sent) && sent > 0 ? sent : expected;
+      let state = v.received_fps === 0 ? "bad" : ratioState(received, reference, 0.9, 0.6);
+      let note = isNum(delay) ? fixed(delay, delay < 10 ? 1 : 0) + " ms behind the phone" : "Steady";
+      if (v.received_fps === 0) note = "No video arriving";
+      else if (state !== "ok") note = "Receiving " + fixed(received, 0) + " of " + fixed(reference, 0) + " fps";
+      if (isNum(delay) && delay > 250) {
+        state = worse(state, delay > 800 ? "bad" : "warn");
+        note = "Delay " + fixed(delay, 0) + " ms" + (state !== "ok" && note.indexOf("Receiving") === 0 ? " · " + note.toLowerCase() : "");
+      }
+      result.computer = { state, value: v.received_fps, note };
+    }
+
+    // decode
+    const decoded = avg("decoded_fps", v.decoded_fps);
+    const skipped = counterDelta("display_skipped", 10);
+    const errors = counterDelta("decode_errors", 10);
+    {
+      let state = ratioState(decoded, received, 0.9, 0.6);
+      let note = v.decode_errors ? plural(v.decode_errors, "decode error") + " since connecting" : "No errors";
+      if (state !== "ok") note = "Decoding " + fixed(decoded, 0) + " of " + fixed(received, 0) + " fps" + (drops > 0 ? ": the frames the phone dropped are missing" : "");
+      if (errors > 0) { state = worse(state, "warn"); note = plural(errors, "decode error") + " in 10 s"; }
+      if (skipped > 0) { state = worse(state, "warn"); note = "Fell behind: skipped ahead " + skipped + "× in 10 s"; }
+      if (v.decode_backlog > 24) { state = worse(state, "warn"); note = "Backlog of " + v.decode_backlog + " frames"; }
+      result.decode = { state, value: v.decoded_fps, note };
+    }
+
+    // hands
+    if (h.error) result.hands = { state: "bad", value: null, note: "Unavailable: " + h.error };
+    else if (!h.available) result.hands = { state: "off", value: null, note: "Off (started with --no-hands)" };
+    else if (!h.enabled) result.hands = { state: "off", value: null, note: "Off · press H to track" };
+    else {
+      const tracked = avg("hands_fps", h.fps);
+      let state = decoded > 1 && h.fps === 0 ? "bad" : ratioState(tracked, decoded, 0.5, 0.2);
+      let note = isNum(h.process_ms) ? fixed(h.process_ms, 0) + " ms per frame" : "Steady";
+      if (state === "bad" && h.fps === 0) note = "Stalled: no frames tracked";
+      else if (state !== "ok") note = "Tracking " + fixed(tracked, 0) + " of " + fixed(decoded, 0) + " fps";
+      result.hands = { state, value: h.fps, note };
+    }
+    return result;
+  }
+
+  const STATE_ICON = { ok: "check", warn: "alert", bad: "x", idle: "minus", off: "minus" };
+  const STATE_WORD = { ok: "steady", warn: "unstable", bad: "failing", idle: "waiting", off: "off" };
+
+  function renderChain(st) {
+    const chain = assessChain(st);
+    const expected = st.video.format ? st.video.format.fps : null;
+    const problems = [];
+    for (const hop of HOPS) {
+      const info = chain[hop.key];
+      const n = hopNodes[hop.key];
+      setClass(n.node, "hop " + info.state);
+      if (n.stateName !== info.state) {
+        n.state.replaceChildren(icon(STATE_ICON[info.state], "sm"));
+        n.stateName = info.state;
+      }
+      n.state.setAttribute("aria-label", hop.name + " " + STATE_WORD[info.state]);
+      setText(n.big, isNum(info.value) ? fixed(info.value, 1) : info.state === "off" ? "Off" : "–");
+      setText(n.unit, isNum(info.value) && expected ? "/ " + expected : "");
+      setText(n.note, info.note || "");
+      n.node.title = hop.tip + (info.note ? "\n" + info.note : "");
+      if (info.state === "warn" || info.state === "bad") problems.push({ hop, info });
+    }
+    // the summary names the unstable hop(s) in words
+    const box = $("chain-summary");
+    let cls = "chain-summary", iconName = "minus", text;
+    if (!st.link.connected) text = "No iPhone connected";
+    else if (!st.video.format) text = "Connected · waiting for video";
+    else if (problems.length) {
+      // in chain order: the first unstable hop is usually the cause of the ones after it
+      const failing = problems.some((p) => p.info.state === "bad");
+      cls += failing ? " bad" : " warn";
+      iconName = failing ? "x" : "alert";
+      text = problems.map((p) => p.hop.name + ": " + p.info.note.charAt(0).toLowerCase() + p.info.note.slice(1)).join("  ·  ");
+    } else {
+      cls += " ok"; iconName = "check";
+      text = "Every hop is keeping up · " + fixed(st.video.decoded_fps, 0) + " of " + expected + " fps end to end";
+      if (isNum(st.video.delay_ms)) text += " · " + fixed(st.video.delay_ms, st.video.delay_ms < 10 ? 1 : 0) + " ms delay";
+    }
+    setClass(box, cls);
+    if (box.dataset.icon !== iconName || box.lastChild.textContent !== text) {
+      box.replaceChildren(icon(iconName), el("span", null, text));
+      box.dataset.icon = iconName;
+    }
+    setText($("chain-aside"), expected ? "Frames per second · target " + expected : "");
+  }
+
+  // ---------------------------------------------------------------- live video (frame + landmarks in one part)
+
+  const STREAMING = !!(window.fetch && window.ReadableStream && window.AbortController && window.createImageBitmap &&
+    window.Response && "body" in Response.prototype);
+  const video = {
+    wanted: false,
+    mode: STREAMING ? "fetch" : "img",
+    controller: null,
+    retry: null,
+    failures: 0,
+    bitmap: null,
+    hands: null,
+    pending: null,
+    decoding: false,
+    lastPart: 0,
+    gotPart: false,         // the current stream has delivered a part
+    slowStarts: 0,          // streams in a row reopened for want of a first picture
+    ready: false,           // a picture is on screen (or, with the img fallback, loaded)
+    drawQueued: false,
+  };
+  const FIRST_PART_MS = 1000;  // a new stream must deliver its first picture this fast, or it is reopened (doubling each time)
+  const STALL_MS = 4000;       // later, a gap this long counts as a stalled stream
+  const HIDDEN_GRACE_MS = 5000;  // a tab hidden this long closes its stream; a brief hide keeps it
+  let pageVisible = !document.hidden;
+  let hiddenTimer = null;
+
+  // An incremental multipart/x-mixed-replace parser: calls onPart(bytes, headers) per complete part.
+  function multipartParser(onPart) {
+    let buf = new Uint8Array(1 << 18), len = 0;
+    const decoder = new TextDecoder("latin1");
+    function headerEnd(from) {
+      for (let i = from; i + 3 < len; i++) {
+        if (buf[i] === 13 && buf[i + 1] === 10 && buf[i + 2] === 13 && buf[i + 3] === 10) return i;
+      }
+      return -1;
+    }
+    return function push(chunk) {
+      if (len + chunk.length > buf.length) {
+        let capacity = buf.length;
+        while (capacity < len + chunk.length) capacity *= 2;
+        const bigger = new Uint8Array(capacity);
+        bigger.set(buf.subarray(0, len));
+        buf = bigger;
+      }
+      buf.set(chunk, len);
+      len += chunk.length;
+      let pos = 0;
+      for (;;) {
+        const end = headerEnd(pos);
+        if (end < 0) break;
+        const headers = {};
+        for (const line of decoder.decode(buf.subarray(pos, end)).split("\r\n")) {
+          const colon = line.indexOf(":");
+          if (colon > 0) headers[line.slice(0, colon).trim().toLowerCase()] = line.slice(colon + 1).trim();
+        }
+        const length = parseInt(headers["content-length"], 10);
+        if (!(length >= 0)) { pos = end + 4; continue; }
+        if (len < end + 4 + length) break;
+        onPart(buf.slice(end + 4, end + 4 + length), headers);
+        pos = end + 4 + length;
+      }
+      if (pos > 0) { buf.copyWithin(0, pos, len); len -= pos; }
+    };
+  }
+
+  function onPart(bytes, headers) {
+    video.lastPart = performance.now();
+    video.gotPart = true;
+    video.slowStarts = 0;
+    video.failures = 0;
+    video.pending = { bytes, hands: headers["x-hands"] };  // a newer part replaces one not yet decoded
+    if (!video.decoding) decodeNext();
+  }
+  async function decodeNext() {
+    const part = video.pending;
+    video.pending = null;
+    if (!part) return;
+    video.decoding = true;
+    try {
+      const bitmap = await createImageBitmap(new Blob([part.bytes], { type: "image/jpeg" }));
+      let hands = null;
+      try { hands = part.hands ? JSON.parse(part.hands) : null; } catch (error) { hands = null; }
+      if (video.wanted) {
+        if (video.bitmap) video.bitmap.close();
+        video.bitmap = bitmap;
+        video.hands = hands;
+        lastFrameInfo = hands;
+        queueDraw();
+        if (!video.ready) { video.ready = true; if (last) renderStage(last); }
+      } else bitmap.close();
+    } catch (error) { /* a corrupt part: skip it */ }
+    video.decoding = false;
+    if (video.pending) decodeNext();
+  }
+
+  async function runFetch() {
+    const controller = new AbortController();
+    video.controller = controller;
+    video.lastPart = performance.now();  // the first-part deadline counts from here
+    video.gotPart = false;
+    const push = multipartParser(onPart);
+    try {
+      const response = await fetch("/api/live.mjpg", { cache: "no-store", credentials: "same-origin", signal: controller.signal });
+      if (!response.ok || !response.body) throw new Error("HTTP " + response.status);
+      const reader = response.body.getReader();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) push(value);
+      }
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      video.failures += 1;
+    }
+    if (video.controller !== controller) return;
+    video.controller = null;
+    if (!video.wanted) return;
+    if (video.failures >= 3 && !video.bitmap) {  // streaming fetch does not work here: show the plain stream
+      video.mode = "img";
+      startImg();
+      return;
+    }
+    clearTimeout(video.retry);
+    video.retry = setTimeout(() => { if (video.wanted && !video.controller) runFetch(); }, 1000);
+  }
+
+  function startImg() {
+    const img = $("fallback");
+    $("video").hidden = true;
+    img.hidden = false;
+    img.src = "/api/stream.mjpg?t=" + Date.now();
+  }
+
+  function setVideo(on) {
+    if (on === video.wanted) return;
+    video.wanted = on;
+    clearTimeout(video.retry);
+    if (on) {
+      if (video.mode === "fetch") runFetch(); else startImg();
+    } else {
+      if (video.controller) { video.controller.abort(); video.controller = null; }
+      $("fallback").removeAttribute("src");
+      video.ready = false;
+      video.pending = null;  // a part of the stream just closed must not be shown later
+      if (video.bitmap) { video.bitmap.close(); video.bitmap = null; }
+      video.hands = null;
+      lastFrameInfo = null;
+      queueDraw();
+    }
+  }
+  // A stream that does not deliver is reopened: within FIRST_PART_MS for its first picture
+  // (a request can hang before it starts, e.g. behind the browser's connection limit), and
+  // after STALL_MS of silence later on.
+  setInterval(() => {
+    if (!(video.wanted && video.mode === "fetch" && video.controller)) return;
+    const limit = video.gotPart ? STALL_MS : Math.min(FIRST_PART_MS * 2 ** video.slowStarts, STALL_MS);
+    if (performance.now() - video.lastPart > limit) {
+      if (!video.gotPart) video.slowStarts += 1;  // a slow link gets more time on the next try
+      video.controller.abort();
+      video.controller = null;
+      if (video.slowStarts >= 4 && !video.bitmap) {  // streaming fetch never delivers here: use the plain stream
+        video.mode = "img";
+        startImg();
+        return;
+      }
+      runFetch();
+    }
+  }, 200);
+  $("fallback").addEventListener("load", () => {
+    if (video.wanted && !video.ready) { video.ready = true; if (last) renderStage(last); }
+  });
+  $("fallback").addEventListener("error", () => {
+    const img = $("fallback");
+    if (!img.getAttribute("src")) return;
+    img.removeAttribute("src");
+    clearTimeout(video.retry);
+    video.retry = setTimeout(() => { if (video.wanted && video.mode === "img") startImg(); }, 1000);
+  });
+
+  function queueDraw() {
+    if (video.drawQueued) return;
+    video.drawQueued = true;
+    requestAnimationFrame(() => { video.drawQueued = false; drawFrame(); });
+  }
+  function drawFrame() {
+    const canvas = $("video");
+    const area = fitCanvas(canvas);
+    if (!area) return;
+    const { ctx, width, height } = area;
+    const bitmap = video.bitmap;
+    if (!bitmap) return;
+    // contain-fit (the frame box already has the video's aspect, so this is normally exact)
+    const scale = Math.min(width / bitmap.width, height / bitmap.height);
+    const w = bitmap.width * scale, h = bitmap.height * scale;
+    const x0 = (width - w) / 2, y0 = (height - h) / 2;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bitmap, x0, y0, w, h);
+    const info = video.hands;
+    if (info && info.enabled && Array.isArray(info.hands)) {
+      for (const hand of info.hands) drawHand(ctx, hand, x0, y0, w, h);
+    }
+  }
+  function drawHand(ctx, hand, x0, y0, w, h) {
+    const p = hand.points;
+    if (!Array.isArray(p) || p.length < 42) return;
+    const pt = (i) => [x0 + p[2 * i] * w, y0 + p[2 * i + 1] * h];
+    const color = hand.side === "Right" ? palette["hand-right"] : palette["hand-left"];
+    const unit = Math.min(Math.max(w / 420, 0.75), 2);
+    ctx.save();
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    // palm, faintly filled
+    ctx.beginPath();
+    PALM.forEach((i, k) => { const [x, y] = pt(i); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.closePath();
+    ctx.fillStyle = withAlpha(color, 0.13);
+    ctx.fill();
+    // bones: a soft dark outline under a thin coloured line keeps them legible on any background
+    const bones = new Path2D();
+    for (const [a, b] of HAND_BONES) { const [ax, ay] = pt(a), [bx, by] = pt(b); bones.moveTo(ax, ay); bones.lineTo(bx, by); }
+    ctx.strokeStyle = "rgba(0,0,0,0.45)"; ctx.lineWidth = 4.2 * unit; ctx.stroke(bones);
+    ctx.strokeStyle = color; ctx.lineWidth = 2 * unit; ctx.stroke(bones);
+    // joints
+    for (let i = 0; i < 21; i++) {
+      const [x, y] = pt(i);
+      const r = (i === 0 ? 3.4 : TIPS.indexOf(i) >= 0 ? 2.9 : 2.3) * unit;
+      ctx.beginPath(); ctx.arc(x, y, r + 1.1 * unit, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fillStyle = "#ffffff"; ctx.fill();
+      ctx.beginPath(); ctx.arc(x, y, r * 0.5, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+    }
+    // the L / R tag, beyond the wrist on the side away from the fingers
+    let cx = 0, cy = 0;
+    for (let i = 0; i < 21; i++) { const [x, y] = pt(i); cx += x / 21; cy += y / 21; }
+    const [wx, wy] = pt(0);
+    let dx = wx - cx, dy = wy - cy;
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len; dy /= len;
+    const r = 9 * unit;
+    let tx = wx + dx * (r + 7 * unit), ty = wy + dy * (r + 7 * unit);
+    tx = Math.min(Math.max(tx, x0 + r + 4), x0 + w - r - 4);
+    ty = Math.min(Math.max(ty, y0 + r + 4), y0 + h - r - 4);
+    ctx.beginPath(); ctx.arc(tx, ty, r + 1.5 * unit, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.4)"; ctx.fill();
+    ctx.beginPath(); ctx.arc(tx, ty, r, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+    ctx.fillStyle = "#0b0b0e";
+    ctx.font = "700 " + (11 * unit).toFixed(1) + "px " + cssVar("--font");
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(hand.side === "Right" ? "R" : "L", tx, ty + 0.5 * unit);
+    ctx.restore();
+  }
+  new ResizeObserver(() => { drawFrame(); drawCharts(); }).observe($("frame"));
+  new ResizeObserver(() => drawCharts()).observe(document.querySelector(".inspector"));
+
+  // ---------------------------------------------------------------- stage states
+
+  const LINK_HELP = {
+    usb: { name: "USB", icon: "usb", steps: [
+      "Plug the iPhone into this computer with a cable and unlock it. Tap <b>Trust</b> if it asks.",
+      "Open GlassesData and turn on <b>Computer link (USB)</b>.",
+    ] },
+    wifi: { name: "Wi-Fi", icon: "wifi", steps: [
+      "First time only: press <b>P</b> (or Pair) and scan the code in GlassesData.",
+      "Keep <b>Computer link (Wi-Fi)</b> on in the app. The paired iPhone connects by itself.",
+    ] },
+    tcp: { name: "Test sender", icon: "terminal", steps: ["Start <b>tools/fake_sender.py</b> with <b>--listen</b> on the port given to <b>--tcp</b>."] },
+  };
+  let emptyKey = "";
+
+  function renderStage(st) {
+    const link = st.link, v = st.video;
+    if (v.format && v.format.width && v.format.height) {
+      const frame = $("frame").closest(".shell");
+      const ratio = v.format.width / v.format.height;
+      frame.style.setProperty("--ar", v.format.width + " / " + v.format.height);
+      frame.style.setProperty("--aspect", String(ratio));
+    }
+    // The stream runs while there is a decoded frame and the tab is visible (or was, within
+    // HIDDEN_GRACE_MS); the message covers the frame until the first picture is on screen.
+    const wanted = link.connected && v.has_frame && pageVisible;
+    setVideo(wanted);
+    const showing = wanted && video.ready;
+    $("empty").hidden = showing;
+    $("format-chip").hidden = !(showing && v.format);
+    if (v.format) setText($("format-chip"), v.format.width + "×" + v.format.height + " · " + v.format.fps + " fps");
+    if (showing) return;
+
+    let key, title, text, iconNode, steps = [];
+    if (!link.connected) {
+      const kinds = Object.keys(link.sources);
+      key = "none:" + kinds.join(",");
+      title = "No iPhone connected";
+      text = link.text && link.text.indexOf("Disconnected") === 0 ? link.text + "." : kinds.length ? "Connect over " + (kinds.length > 1 ? "any link below" : "the link below") + ". The video appears here on its own." : "Starting the links…";
+      iconNode = icon("phone", "lg");
+      steps = kinds;
+    } else if (!v.format) {
+      key = "novideo"; title = "Connected to " + (link.device || "the iPhone");
+      text = "No video yet. Start the glasses preview in GlassesData on the iPhone.";
+      iconNode = icon("play", "lg");
+    } else if (!v.has_frame) {
+      // only here is it true: the decoder has nothing to show until a keyframe arrives
+      key = "keyframe"; title = "Video is on its way";
+      text = "The receiver is waiting for the next keyframe from the glasses.";
+      iconNode = el("div", "spinner");
+    } else if (!pageVisible) {
+      key = "paused"; title = "Live picture paused";
+      text = "This tab was in the background. The picture comes back as soon as it is in front.";
+      iconNode = icon("play", "lg");
+    } else {
+      key = "loading"; title = "Loading the live picture";
+      text = "The video is flowing; the first picture is on its way to this page.";
+      iconNode = el("div", "spinner");
+    }
+    if (emptyKey !== key) {
+      emptyKey = key;
+      $("empty-icon").replaceChildren(iconNode);
+      const list = $("empty-steps");
+      list.replaceChildren();
+      for (const kind of steps) {
+        const help = LINK_HELP[kind] || { name: kind.toUpperCase(), icon: "link", steps: [] };
+        const card = el("div", "link-card");
+        const head = el("header");
+        head.appendChild(icon(help.icon));
+        head.appendChild(el("span", null, help.name));
+        card.appendChild(head);
+        const ol = el("ol");
+        for (const step of help.steps) { const li = el("li"); li.innerHTML = "<span>" + step + "</span>"; ol.appendChild(li); }
+        card.appendChild(ol);
+        const now = el("div", "now");
+        now.dataset.kind = kind;
+        now.appendChild(el("i", "dot"));
+        now.appendChild(el("span"));
+        card.appendChild(now);
+        list.appendChild(card);
+      }
+    }
+    setText($("empty-title"), title);
+    setText($("empty-text"), text);
+    for (const now of $("empty-steps").querySelectorAll(".now")) {
+      const status = link.sources[now.dataset.kind] || "";
+      const lower = status.toLowerCase();
+      setText(now.lastChild, sentence(status) || "Starting…");
+      setClass(now.firstChild, "dot " + (/error|fail|cannot|not running|unavailable|refused|denied/.test(lower) ? "bad" : /^connected/.test(lower) ? "good" : "wait"));
+    }
+  }
+
+  // ---------------------------------------------------------------- render
+
+  function render(st) {
+    last = st;
+    const link = st.link, v = st.video, hands = st.hands, rec = st.recording;
+    document.body.classList.toggle("offline", false);
+
+    // top bar
+    const dot = $("link-dot");
+    setClass(dot, "dot " + (link.connected ? (v.has_frame ? "good" : "warn") : ""));
+    setText($("link-name"), link.connected ? (link.device || "iPhone") : "No iPhone");
+    const kindText = link.kind ? { usb: "USB", wifi: "Wi-Fi", tcp: "TCP" }[link.kind] || link.kind.toUpperCase() : "";
+    setText($("link-extra"), link.connected ? kindText + (isNum(v.rtt_ms) ? " · " + fixed(v.rtt_ms, 1) + " ms RTT" : "") : (link.text.indexOf("Disconnected") === 0 ? link.text : "Waiting"));
+    $("rec-pill").hidden = !rec.active;
+    document.body.classList.toggle("recording", rec.active);
+    setText($("rec-pill-time"), clock(rec.seconds));
+    $("shortcut-pair").hidden = !st.wifi.enabled;
+    document.title = (rec.active ? "● REC " + clock(rec.seconds) + " · " : "") + "GlassesData receiver";
+
+    renderStage(st);
+    renderTransport(st);
+    renderChain(st);
+    renderLink(st);
+    renderHands(st);
+    renderVcam(st);
+    renderGlasses(st);
+    renderMotion(st);
+    drawCharts();
+
+    if (wasRecording !== null && wasRecording !== rec.active) loadRecordings();
+    wasRecording = rec.active;
+
+    // pairing dialog
+    const wifi = st.wifi;
+    if (wifi.enabled && wifi.pairing_ready && wifi.pair_at_start && !pairShownAtStart && !link.connected) {
+      pairShownAtStart = true;
+      openPairing();
+    }
+    if ($("pair").open && wifi.enabled && wifi.pairing_ready && !qrRequested) loadQr();
+    let pairText = "";
+    if (wifi.enabled && !wifi.pairing_ready) pairText = "Starting the Wi-Fi listener…";
+    else if (link.connected && link.kind === "wifi") pairText = "Connected over Wi-Fi: pairing worked. You can close this.";
+    setText($("pair-status"), pairText);
+  }
+
+  function renderTransport(st) {
+    const link = st.link, rec = st.recording, hands = st.hands;
+    const button = $("record");
+    const canStart = link.connected && !!st.video.format;
+    button.disabled = busy || (!rec.active && !canStart);
+    button.classList.toggle("active", rec.active);
+    button.setAttribute("aria-label", rec.active ? "Stop recording (R)" : "Start recording (R)");
+    button.title = rec.active ? "Stop recording (R)" : canStart ? "Start recording (R)" : link.connected ? "No video yet" : "No iPhone connected";
+    const timer = $("timer");
+    setText(timer, clock(rec.active ? rec.seconds : 0));
+    timer.classList.toggle("active", rec.active);
+    $("rec-badge").hidden = !rec.active;
+    let line;
+    if (rec.active) line = rec.waiting_for_keyframe ? "Waiting for the next keyframe…" : grouped(rec.frames) + " frames · " + rec.name;
+    else if (!link.connected) line = "No iPhone connected";
+    else if (!st.video.format) line = "No video yet";
+    else if (rec.last) line = "Ready · last: " + rec.last.name + ", " + clock(rec.last.seconds);
+    else line = "Ready to record";
+    setText($("rec-line"), line);
+    $("rec-line").title = rec.active ? rec.folder + "/" + rec.name : "";
+
+    const note = $("rec-notice");
+    note.hidden = !rec.note;
+    if (rec.note) {
+      setText($("rec-notice-text"), rec.note.charAt(0).toUpperCase() + rec.note.slice(1));
+      note.classList.toggle("bad", /stopped|fail|error/i.test(rec.note));
+    }
+
+    const handsButton = $("hands-button");
+    handsButton.disabled = busy || !hands.available;
+    handsButton.classList.toggle("on", hands.enabled);
+    handsButton.setAttribute("aria-pressed", String(hands.enabled));
+    handsButton.title = !hands.available ? (hands.error ? "Hand tracking is unavailable: " + hands.error : "Hand tracking is off (--no-hands)")
+      : (hands.enabled ? "Turn hand tracking off (H)" : "Turn hand tracking on (H)");
+    $("pair-button").hidden = !st.wifi.enabled;
+  }
+
+  function kvRows(id, rows) {
+    const box = $(id);
+    const fragment = document.createDocumentFragment();
+    for (const row of rows) {
+      if (!row) continue;
+      fragment.appendChild(el("dt", null, row[0]));
+      const dd = el("dd", row[2] || null);
+      if (row[1] instanceof Node) dd.appendChild(row[1]); else dd.textContent = row[1];
+      if (row[3]) dd.title = row[3];
+      fragment.appendChild(dd);
+    }
+    const key = rows.map((r) => r ? r[0] + "=" + (r[1] instanceof Node ? r[1].textContent : r[1]) + (r[2] || "") : "").join("|");
+    if (box.dataset.key !== key) { box.dataset.key = key; box.replaceChildren(fragment); }
+  }
+
+  function renderLink(st) {
+    const link = st.link, v = st.video;
+    const kind = link.kind ? { usb: "USB", wifi: "Wi-Fi", tcp: "TCP" }[link.kind] || link.kind : "";
+    const aside = $("link-kind");
+    aside.replaceChildren(link.connected ? el("span", "tag accent", kind) : el("span", "tag", "Not connected"));
+    setText($("delay-value"), isNum(v.delay_ms) ? fixed(v.delay_ms, v.delay_ms < 10 ? 1 : 0) : "–");
+    const sources = Object.keys(link.sources).map((k) => [(LINK_HELP[k] ? LINK_HELP[k].name : k.toUpperCase()), sentence(link.sources[k]), "", link.sources[k]]);
+    kvRows("link-kv", [
+      link.connected ? ["Device", link.device || "–"] : ["State", link.text, "", link.text],
+      ["Round trip", isNum(v.rtt_ms) ? fixed(v.rtt_ms, 1) + " ms" : "–"],
+      ...sources,
+    ]);
+  }
+
+  function renderHands(st) {
+    const h = st.hands;
+    let tag;
+    if (h.error) tag = el("span", "tag bad", "Unavailable");
+    else if (!h.available) tag = el("span", "tag", "Off");
+    else if (!h.enabled) tag = el("span", "tag", "Paused");
+    else if (!st.link.connected || !st.video.has_frame) tag = el("span", "tag", "Idle");
+    else tag = el("span", "tag good", "Tracking");
+    const aside = $("hands-state");
+    if (aside.textContent !== tag.textContent) aside.replaceChildren(tag);
+    setText($("hands-fps"), h.enabled && st.video.has_frame ? fixed(h.fps, 1) : "–");
+    setText($("hands-ms"), h.enabled && isNum(h.process_ms) ? fixed(h.process_ms, 0) : "–");
+    const list = $("hand-list");
+    if (!list.children.length) {
+      for (const side of ["Left", "Right"]) {
+        const card = el("div", "hand absent");
+        card.dataset.side = side;
+        const badge = el("div", "hand-badge", side[0]);
+        badge.style.background = side === "Left" ? "var(--hand-left)" : "var(--hand-right)";
+        const text = el("div", "hand-text");
+        text.appendChild(el("span", null, side));
+        text.appendChild(el("small", null, "Not in view"));
+        const meter = el("div", "meter");
+        meter.style.color = side === "Left" ? "var(--hand-left)" : "var(--hand-right)";
+        meter.appendChild(el("i"));
+        text.appendChild(meter);
+        card.append(badge, text);
+        list.appendChild(card);
+      }
+    }
+    for (const card of list.children) {
+      const found = h.enabled ? h.detected.find((d) => d.handedness === card.dataset.side) : null;
+      card.classList.toggle("absent", !found);
+      setText(card.querySelector("small"), found ? found.score.toFixed(2) : "–");
+      card.title = card.dataset.side + " hand: " + (found ? "confidence " + found.score.toFixed(2) : h.enabled ? "not in view" : "not tracking");
+      card.querySelector(".meter i").style.width = found ? Math.round(found.score * 100) + "%" : "0%";
+    }
+    const info = lastFrameInfo;
+    let sync = "–", syncCls = "";
+    if (video.mode === "img" && video.wanted) sync = "Drawn by the receiver";
+    else if (info && info.enabled && info.hands.length && isNum(info.lag)) {
+      sync = info.lag === 0 ? "Same frame" : "Lags " + plural(info.lag, "frame");
+      syncCls = info.lag === 0 ? "good" : info.lag > 3 ? "warn" : "";
+    } else if (h.enabled && video.wanted) sync = "No hands in this frame";
+    kvRows("hands-kv", [["Skeleton", sync, syncCls, "Whether the skeleton on screen belongs to the frame it is drawn on"]]);
+    const chip = $("sync-chip");
+    chip.hidden = true;
+  }
+
+  // ---------------------------------------------------------------- virtual camera
+
+  const vcamUi = { busy: false, holdPositionUntil: 0, pendingPosition: null, sendTimer: null, previewOn: false, previewTimer: null, previewLoading: false };
+  function vcamSetUp(vc) { return !!(vc && vc.width); }
+  function bandText(position) {
+    const pct = Math.round(position * 100);
+    return pct === 0 ? "Top" : pct === 100 ? "Bottom" : pct === 50 ? "Middle" : pct + "% down";
+  }
+  function showSlider(position) {
+    const slider = $("vcam-position");
+    const value = Math.round(position * 100);
+    if (Number(slider.value) !== value) slider.value = String(value);
+    slider.style.setProperty("--fill", value + "%");
+    slider.setAttribute("aria-valuetext", bandText(position));
+    setText($("vcam-position-value"), bandText(position));
+  }
+
+  function renderVcam(st) {
+    const vc = st.vcam, setUp = vcamSetUp(vc);
+    $("vcam-panel").hidden = !setUp;
+    $("vcam-button").hidden = !setUp;
+    $("shortcut-vcam").hidden = !setUp;
+    if (!setUp) { stopPreview(); return; }
+    const on = vc.running;
+    const live = on && vc.showing === "video";
+    const unavailable = !on && (!vc.available || !!vc.last_error);
+
+    const sw = $("vcam-switch");
+    sw.setAttribute("aria-checked", String(on));
+    sw.disabled = vcamUi.busy;
+    sw.title = (on ? "Stop" : "Start") + " the virtual camera (V)";
+    const button = $("vcam-button");
+    button.classList.toggle("on", on);
+    button.setAttribute("aria-pressed", String(on));
+    button.disabled = vcamUi.busy;
+    button.title = (on ? "Stop the virtual camera" : unavailable ? "The virtual camera is unavailable: see its panel" : "Send the glasses video to Zoom and other apps") + " (V)";
+
+    const tag = $("vcam-tag");
+    setClass(tag, live ? "tag good" : on ? "tag accent" : unavailable ? "tag bad" : "tag");
+    setText(tag, live ? "Live" : on ? "On · no video" : !vc.available ? "Not installed" : vc.last_error ? "Unavailable" : "Off");
+
+    for (const b of document.querySelectorAll("#vcam-panel [data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === vc.mode));
+    setText($("vcam-mode-note"), vc.mode === "fill" ? "A band fills the picture" : "The whole frame, blurred sides");
+    $("vcam-position-field").hidden = vc.mode !== "fill";
+    if (performance.now() > vcamUi.holdPositionUntil) showSlider(vc.position);
+    $("vcam-overlay").setAttribute("aria-checked", String(vc.overlay));
+    setText($("vcam-overlay-note"), !vc.overlay ? "Not drawn" : !st.hands.available ? "Hand tracking is unavailable"
+      : !st.hands.enabled ? "Shows once hand tracking is on (H)" : "Drawn into the picture");
+
+    setText($("vcam-chip"), vc.width + "×" + vc.height);
+    $("vcam-chip").hidden = !on;
+    setText($("vcam-idle-text"), vcamUi.busy ? (on ? "Stopping…" : "Starting…") : on ? "Starting…"
+      : unavailable ? "Unavailable" : "Off. Press V to send the glasses video to Zoom and other apps.");
+    if (on && pageVisible) startPreview(); else stopPreview();
+
+    kvRows("vcam-kv", [
+      ["Device", vc.device ? vc.device + (vc.backend ? " · " + vc.backend : "") : "–", "", vc.device || ""],
+      ["Sends", vc.width + "×" + vc.height + " at " + vc.fps + " fps" + (on ? " · " + grouped(vc.frames_sent) + " frames" : "")],
+      on && vc.check ? ["Check", /rejected/.test(vc.check) ? "OBS rejects the frames" : "No complaint from the device", /rejected/.test(vc.check) ? "bad" : "",
+        vc.check + ". Whether an app receives the picture cannot be seen from here: check in Zoom or QuickTime."] : null,
+    ]);
+
+    let title = "", text = "";
+    if (on && vc.last_error) { title = "Apps receive nothing"; text = vc.last_error; }
+    else if (!on && !vc.available) { title = "pyvirtualcam is not installed"; text = vc.hint || ""; }
+    else if (!on && vc.last_error) { title = sentence(vc.last_error); text = vc.hint || ""; }
+    const notice = $("vcam-notice");
+    notice.hidden = !title;
+    notice.classList.toggle("bad", !!title);
+    setText($("vcam-notice-title"), title);
+    setText($("vcam-notice-text"), text);
+  }
+
+  // The thumbnail: the picture the camera is sending, fetched one at a time (a slow page only
+  // fetches less often) and drawn on a canvas.
+  function startPreview() {
+    if (vcamUi.previewOn) return;
+    vcamUi.previewOn = true;
+    loadPreview();
+  }
+  function stopPreview() {
+    if (!vcamUi.previewOn && $("vcam-idle").hidden === false) return;
+    vcamUi.previewOn = false;
+    clearTimeout(vcamUi.previewTimer);
+    $("vcam-idle").hidden = false;
+    fitCanvas($("vcam-canvas"));  // clears it
+  }
+  async function loadPreview() {
+    if (!vcamUi.previewOn || vcamUi.previewLoading) return;
+    vcamUi.previewLoading = true;
+    let wait = 250;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3000);  // one stuck request must not stop the thumbnail
+    try {
+      const response = await fetch("/api/vcam/preview.jpg", { cache: "no-store", credentials: "same-origin", signal: controller.signal });
+      if (!response.ok) throw new Error("HTTP " + response.status);
+      const bitmap = await createImageBitmap(await response.blob());
+      if (vcamUi.previewOn) {
+        const area = fitCanvas($("vcam-canvas"));
+        if (area) {
+          area.ctx.imageSmoothingQuality = "high";
+          area.ctx.drawImage(bitmap, 0, 0, area.width, area.height);
+          $("vcam-idle").hidden = true;
+        }
+      }
+      bitmap.close();
+    } catch (error) { wait = 1000; }
+    clearTimeout(timer);
+    vcamUi.previewLoading = false;
+    clearTimeout(vcamUi.previewTimer);
+    if (vcamUi.previewOn) vcamUi.previewTimer = setTimeout(loadPreview, wait);
+  }
+
+  function applyVcam(result) {
+    if (result && result.vcam && last) { last.vcam = result.vcam; renderVcam(last); }
+  }
+  async function toggleVcam() {
+    if (!last || !vcamSetUp(last.vcam) || vcamUi.busy) return;
+    const stopping = last.vcam.running;
+    vcamUi.busy = true;
+    renderVcam(last);
+    try {
+      const result = await post(stopping ? "/api/vcam/stop" : "/api/vcam/start");
+      vcamUi.busy = false;
+      applyVcam(result);
+      toast(result.message || (result.ok ? "Done" : "Failed"), result.ok ? (stopping ? "" : "good") : "bad");
+    } catch (error) {
+      vcamUi.busy = false;
+      toast("Could not reach the receiver.", "bad");
+    }
+    if (last) renderVcam(last);
+  }
+  let vcamRequest = 0;
+  async function setVcam(changes) {
+    if (!last || !vcamSetUp(last.vcam)) return;
+    Object.assign(last.vcam, changes);  // show it at once; the answer confirms or corrects it
+    renderVcam(last);
+    const request = ++vcamRequest;
+    try {
+      const result = await post("/api/vcam/settings", changes);
+      if (!result.ok) toast(result.message, "bad");
+      if (request !== vcamRequest) return;  // a newer change was sent meanwhile: its answer decides
+      if (result.vcam && last) {
+        if ("position" in changes && performance.now() < vcamUi.holdPositionUntil) delete result.vcam.position;  // still dragging
+        Object.assign(last.vcam, result.vcam);
+        renderVcam(last);
+      }
+    } catch (error) { toast("Could not reach the receiver.", "bad"); }
+  }
+  function flushPosition() {
+    vcamUi.sendTimer = null;
+    if (vcamUi.pendingPosition === null) return;
+    const position = vcamUi.pendingPosition;
+    vcamUi.pendingPosition = null;
+    setVcam({ position });
+  }
+  $("vcam-switch").addEventListener("click", toggleVcam);
+  $("vcam-button").addEventListener("click", toggleVcam);
+  for (const b of document.querySelectorAll("#vcam-panel [data-mode]")) {
+    b.addEventListener("click", () => { if (last && last.vcam.mode !== b.dataset.mode) setVcam({ mode: b.dataset.mode }); });
+  }
+  $("vcam-overlay").addEventListener("click", () => { if (last) setVcam({ overlay: !last.vcam.overlay }); });
+  $("vcam-position").addEventListener("input", () => {
+    const position = Number($("vcam-position").value) / 100;
+    vcamUi.holdPositionUntil = performance.now() + 1200;  // the status poll must not move the thumb back meanwhile
+    showSlider(position);
+    vcamUi.pendingPosition = position;
+    if (!vcamUi.sendTimer) vcamUi.sendTimer = setTimeout(flushPosition, 120);  // at most ~8 requests a second while dragging
+  });
+
+  function renderGlasses(st) {
+    const g = st.glasses.state;
+    const battery = $("battery"), level = $("battery-level");
+    const circumference = 2 * Math.PI * 23;
+    if (g && isNum(g.battery)) {
+      const pct = Math.max(0, Math.min(100, g.battery));
+      setClass(battery, "battery" + (pct < 15 ? " bad" : pct < 30 ? " warn" : ""));
+      level.setAttribute("stroke-dashoffset", String(circumference * (1 - pct / 100)));
+      setText($("battery-text"), Math.round(pct) + "%");
+      battery.setAttribute("aria-label", "Battery " + Math.round(pct) + " percent");
+      setText($("battery-detail"), words(g.charging));
+    } else {
+      setClass(battery, "battery unknown");
+      level.setAttribute("stroke-dashoffset", String(circumference));
+      setText($("battery-text"), "–");
+      setText($("battery-detail"), st.link.connected ? "No data from the glasses yet" : "Not connected");
+    }
+    const chips = [
+      ["worn", "Worn", g ? g.don : null, (x) => /doff|off|not/i.test(x || "") ? "warn" : ""],
+      ["hinge", "Hinge", g ? g.hinge : null, (x) => /clos|fold/i.test(x || "") ? "warn" : ""],
+      ["thermo", "Thermal", g ? g.thermal : null, (x) => !x || /normal|nominal/i.test(x) ? "" : /crit|serious|severe/i.test(x) ? "bad" : "warn"],
+      ["link", "Glasses link", g ? g.link : null, (x) => !x || /connect/i.test(x) && !/dis/i.test(x) ? "" : "warn"],
+    ];
+    const box = $("chips");
+    const key = chips.map((c) => c[2]).join("|");
+    if (box.dataset.key !== key) {
+      box.dataset.key = key;
+      box.replaceChildren(...chips.map(([iconName, label, value, tone]) => {
+        const chip = el("div", "chip " + (value ? tone(value) : ""));
+        chip.appendChild(icon(iconName));
+        const text = el("div", "chip-text");
+        text.appendChild(el("small", null, label));
+        text.appendChild(el("span", null, words(value)));
+        chip.appendChild(text);
+        return chip;
+      }));
+    }
+    const inputs = st.glasses.inputs;
+    const list = $("inputs");
+    const ikey = JSON.stringify(inputs);
+    if (list.dataset.key !== ikey) {
+      list.dataset.key = ikey;
+      list.replaceChildren(...inputs.map((e) => el("li", "tag", [words(e.type), e.detail ? words(e.detail) : ""].join(" ").trim())));
+    }
+    setText($("glasses-aside"), g ? "" : "");
+  }
+
+  const IMU = [
+    { key: "accel", label: "Accel", unit: "m/s²", fields: ["ax", "ay", "az"] },
+    { key: "gyro", label: "Gyro", unit: "rad/s", fields: ["gx", "gy", "gz"] },
+    { key: "mag", label: "Mag", unit: "µT", fields: ["mx", "my", "mz"] },
+  ];
+  const imuNodes = {};
+  function buildMotion() {
+    const grid = $("motion-grid");
+    for (const item of IMU) {
+      const box = el("div", "imu");
+      const head = el("div", "imu-head");
+      head.appendChild(el("span", "label", item.label));
+      head.appendChild(el("span", "faint", item.unit));
+      const chart = el("canvas", "chart");
+      chart.setAttribute("aria-hidden", "true");
+      const vals = el("div", "imu-vals");
+      const spans = ["x", "y", "z"].map((axis) => {
+        const span = el("span");
+        const swatch = el("i");
+        swatch.style.background = "var(--axis-" + axis + ")";
+        span.append(swatch, el("b", null, axis), el("span", "num", "–"));
+        vals.appendChild(span);
+        return span.lastChild;
+      });
+      box.append(head, chart, vals);
+      grid.appendChild(box);
+      imuNodes[item.key] = { chart, spans };
+    }
+  }
+  function renderMotion(st) {
+    const m = st.motion;
+    for (const item of IMU) {
+      const values = m[item.key];
+      imuNodes[item.key].spans.forEach((span, i) => {
+        const v = Array.isArray(values) ? values[i] : null;
+        setText(span, isNum(v) ? (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2) : "–");
+      });
+    }
+    setText($("motion-aside"), isNum(m.samples_per_s) ? fixed(m.samples_per_s, 0) + " samples/s" + (m.source ? " · " + words(m.source) : "") : "No motion data");
+  }
+
+  function drawCharts() {
+    if (!last) return;
+    const expected = last.video.format ? last.video.format.fps : null;
+    const chain = {};
+    for (const hop of HOPS) {
+      const n = hopNodes[hop.key];
+      const state = n.node.classList.contains("warn") ? "warn" : n.node.classList.contains("bad") ? "bad" : "chart-line";
+      sparkline(n.chart, [{ points: series(hop.field), color: palette[state] }],
+        { min: 0, max: Math.max(expected ? expected * 1.2 : 30, 1), target: expected });
+    }
+    const delays = series("delay_ms");
+    let peak = 0;
+    for (const [, v] of delays) if (isNum(v)) peak = Math.max(peak, v);
+    sparkline($("delay-chart"), [{ points: delays, color: palette.accent, fill: true }], { min: 0, max: Math.max(20, peak * 1.25) });
+    for (const item of IMU) {
+      sparkline(imuNodes[item.key].chart, item.fields.map((field, i) => ({ points: series(field), color: palette["axis-" + "xyz"[i]] })),
+        { zero: true, minSpan: item.key === "gyro" ? 0.05 : 0.5 });
+    }
+  }
+
+  // ---------------------------------------------------------------- recordings
+
+  function startedText(iso) {
+    if (!iso) return "–";
+    const date = new Date(iso);
+    if (isNaN(date)) return "–";
+    const today = new Date();
+    const time = date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    if (date.toDateString() === today.toDateString()) return "Today " + time;
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+    if (date.toDateString() === yesterday.toDateString()) return "Yesterday " + time;
+    return date.toLocaleDateString([], { month: "short", day: "numeric" }) + " " + time;
+  }
+  function renderRecordings() {
+    const box = $("rec-list");
+    if (!recordings.length) {
+      const empty = el("div", "rec-empty");
+      empty.appendChild(icon("folder"));
+      empty.appendChild(el("span", null, "No recordings yet. Press R to start one."));
+      box.replaceChildren(empty);
+      return;
+    }
+    const table = el("table", "rec-table");
+    const head = el("thead");
+    const hr = el("tr");
+    for (const [label, cls] of [["Name", ""], ["Started", ""], ["Duration", "r"], ["Frames", "r"], ["Size", "r"], ["State", ""]]) hr.appendChild(el("th", cls, label));
+    head.appendChild(hr);
+    const body = el("tbody");
+    const shown = showAllRecordings ? recordings : recordings.slice(0, 8);
+    for (const r of shown) {
+      const tr = el("tr");
+      tr.appendChild(el("td", "rec-name num", r.name));
+      tr.appendChild(el("td", "meta muted", startedText(r.started)));
+      tr.appendChild(el("td", "meta r num", isNum(r.seconds) ? clock(r.seconds) : "–"));
+      tr.appendChild(el("td", "meta r num frames", isNum(r.frames) ? grouped(r.frames) : "–"));
+      tr.appendChild(el("td", "meta r num muted", size(r.bytes)));
+      const state = el("td", "state");
+      let badge;
+      if (r.state === "recording") { badge = el("span", "tag rec"); badge.append(el("span", "dot rec"), el("span", null, "Recording")); }
+      else if (r.state === "complete") { badge = el("span", "tag"); badge.append(icon("check", "sm"), el("span", null, "Complete")); }
+      else { badge = el("span", "tag warn"); badge.append(icon("alert", "sm"), el("span", null, "Interrupted")); badge.title = "The receiver stopped without closing it; video.mp4 plays up to its last fragment"; }
+      state.appendChild(badge);
+      tr.appendChild(state);
+      body.appendChild(tr);
+    }
+    table.append(head, body);
+    const nodes = [table];
+    if (recordings.length > 8) {
+      const more = el("button", "btn ghost small show-all", showAllRecordings ? "Show fewer" : "Show all " + recordings.length);
+      more.type = "button";
+      more.addEventListener("click", () => { showAllRecordings = !showAllRecordings; renderRecordings(); });
+      nodes.push(more);
+    }
+    box.replaceChildren(...nodes);
+  }
+  async function loadRecordings() {
+    try {
+      const data = await getJson("/api/recordings");
+      const folder = $("rec-folder");
+      setText(folder, "‎" + data.folder + "‎");
+      folder.title = data.folder;
+      folder.dataset.path = data.folder;
+      recordings = data.recordings;
+      renderRecordings();
+    } catch (error) { /* the banner already reports a lost receiver */ }
+  }
+  $("copy-folder").addEventListener("click", async () => {
+    const path = $("rec-folder").dataset.path;
+    if (!path) return;
+    try { await navigator.clipboard.writeText(path); toast("Folder path copied", "good"); }
+    catch (error) { toast("Could not copy: " + path, "bad"); }
+  });
+
+  // ---------------------------------------------------------------- loops
+
+  let pollTimer = null, polling = false;
+  async function poll() {
+    if (polling) return;
+    polling = true;
+    clearTimeout(pollTimer);
+    try {
+      const since = history.length ? "?since=" + lastT() : "";
+      const [status, hist] = await Promise.all([getJson("/api/status"), getJson("/api/history" + since).catch(() => null)]);
+      addHistory(hist);
+      $("banner").hidden = true;
+      document.body.classList.remove("offline");
+      render(status);
+    } catch (error) {
+      $("banner").hidden = false;
+      document.body.classList.add("offline");
+      setVideo(false);
+      $("empty").hidden = false;
+    }
+    polling = false;
+    pollTimer = setTimeout(poll, POLL_MS);
+  }
+
+  // ---------------------------------------------------------------- actions
+
+  async function toggleRecording() {
+    if (!last || busy) return;  // when the button is disabled, R still asks: the receiver says why it cannot start
+    busy = true;
+    $("record").disabled = true;
+    const stopping = last.recording.active;
+    try {
+      const result = await post(stopping ? "/api/record/stop" : "/api/record/start");
+      toast(result.message || (result.ok ? "Done" : "Failed"), result.ok ? (stopping ? "good" : "") : "bad");
+    } catch (error) {
+      toast("Could not reach the receiver.", "bad");
+    }
+    busy = false;
+    loadRecordings();
+  }
+  async function toggleHands() {
+    if (!last || busy) return;
+    if (!last.hands.available) { toast(last.hands.error ? "Hand tracking is unavailable: " + last.hands.error : "Hand tracking is off (the receiver runs with --no-hands)", "bad"); return; }
+    busy = true;
+    try {
+      const result = await post("/api/hands/toggle");
+      if (!result.ok) toast(result.message, "bad"); else toast(result.message);
+    } catch (error) {
+      toast("Could not reach the receiver.", "bad");
+    }
+    busy = false;
+  }
+  $("record").addEventListener("click", toggleRecording);
+  $("hands-button").addEventListener("click", toggleHands);
+
+  function loadQr() {
+    const qr = $("qr");
+    qrRequested = true;
+    qr.hidden = false;
+    qr.src = "/api/pairing.png?t=" + Date.now();
+  }
+  function openPairing() {
+    const enabled = !!(last && last.wifi.enabled);
+    $("pair-on").hidden = !enabled;
+    $("pair-off").hidden = enabled;
+    $("qr").hidden = true;
+    if (enabled && last.wifi.pairing_ready) loadQr();
+    const dialog = $("pair");
+    if (!dialog.open) dialog.showModal();
+  }
+  $("pair-button").addEventListener("click", openPairing);
+  $("pair-close").addEventListener("click", () => $("pair").close());
+  $("pair").addEventListener("close", () => { $("qr").removeAttribute("src"); qrRequested = false; });
+  $("qr").addEventListener("error", () => {
+    if (!$("qr").getAttribute("src")) return;  // cleared on close
+    $("qr").hidden = true;
+    setText($("pair-status"), "The pairing code is not available.");
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
+    if ($("pair").open) return;
+    const target = event.target;
+    if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+    const key = event.key.toLowerCase();
+    if (key === "r") { event.preventDefault(); toggleRecording(); }
+    else if (key === "h") { event.preventDefault(); toggleHands(); }
+    else if (key === "v") {
+      event.preventDefault();
+      if (last && vcamSetUp(last.vcam)) toggleVcam(); else toast("This receiver has no virtual camera output.");
+    }
+    else if (key === "p") {
+      event.preventDefault();
+      if (last && last.wifi.enabled) openPairing(); else toast("Wi-Fi is off: restart the receiver with --wifi to pair over Wi-Fi.");
+    }
+  });
+  // Hidden tabs close their stream (after a grace period: an embedded view may flicker), and
+  // a tab coming back opens it at once, without waiting for the next poll, which the browser
+  // throttles in background tabs (to 1 s, or to 1 minute after a while).
+  document.addEventListener("visibilitychange", () => {
+    clearTimeout(hiddenTimer);
+    if (document.hidden) {
+      hiddenTimer = setTimeout(() => { pageVisible = false; setVideo(false); if (last) render(last); }, HIDDEN_GRACE_MS);
+      return;
+    }
+    pageVisible = true;
+    if (last) render(last);
+    poll();
+  });
+
+  buildHops();
+  buildMotion();
+  poll();
+  loadRecordings();
+  setInterval(loadRecordings, LIST_MS);
+})();
+</script>
+</body>
+</html>

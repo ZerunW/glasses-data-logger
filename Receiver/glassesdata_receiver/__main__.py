@@ -1,0 +1,245 @@
+"""Command line entry point: ``python -m glassesdata_receiver``."""
+
+from __future__ import annotations
+
+import argparse
+import logging
+import signal
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+from . import paths, protocol
+from .receiver import Receiver
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="glassesdata_receiver",
+        description="Receive Meta glasses video and sensors from the GlassesData iPhone app, "
+        "record them, and track hand skeletons in real time.",
+    )
+    parser.add_argument("--usb", action="store_true", help="connect to the iPhone over a USB cable (default)")
+    parser.add_argument("--wifi", action="store_true", help="accept the iPhone over encrypted Wi-Fi")
+    parser.add_argument("--pair", action="store_true", help="with --wifi: show the pairing QR code at start")
+    parser.add_argument("--reset-pairing", action="store_true", help="forget the paired iPhone: new certificate and token")
+    parser.add_argument(
+        "--state-dir", type=Path, metavar="DIR",
+        help=f"where the Wi-Fi identity lives: certificate, key, pairing.json (default {paths.state_dir()})",
+    )
+    parser.add_argument(
+        "--print-pairing", action="store_true",
+        help="with --wifi: print PAIRING_URI=<uri> on stdout once the listener accepts connections",
+    )
+    parser.add_argument("--tcp", metavar="HOST:PORT", help="connect to a GDL1 sender over plain TCP (testing)")
+    parser.add_argument("--port", type=int, default=protocol.DEFAULT_PORT, help="link port (default %(default)s)")
+    parser.add_argument("--out", type=Path, default=paths.recordings_dir(), help="recordings folder (default %(default)s)")
+    parser.add_argument("--record", action="store_true", help="start recording as soon as video arrives")
+    parser.add_argument("--no-hands", action="store_true", help="disable hand tracking")
+    parser.add_argument("--max-hands", type=int, default=2)
+    parser.add_argument(
+        "--mirrored-input", action="store_true",
+        help="the video is mirrored (selfie style): swap MediaPipe's hand labels so Left stays the person's left hand",
+    )
+    parser.add_argument(
+        "--virtual-camera", action="store_true",
+        help="start with the virtual camera on (OBS Virtual Camera on macOS, v4l2loopback on Linux); "
+        "without it, it can still be started from the web page",
+    )
+    parser.add_argument(
+        "--virtual-camera-size", default="1920x1080", choices=["1920x1080", "1280x720"],
+        help="the landscape picture sent to the virtual camera (default %(default)s)",
+    )
+    parser.add_argument(
+        "--virtual-camera-mode", default="fit", choices=["fit", "fill"],
+        help="fit: the whole portrait frame with blurred sides (default); fill: a landscape band that covers the picture",
+    )
+    parser.add_argument("--overlay", action="store_true", help="draw the hand skeleton on the virtual camera picture")
+    parser.add_argument(
+        "--web-port", type=int, default=8765, metavar="PORT",
+        help="port of the web page (default %(default)s; 0 picks a free port)",
+    )
+    parser.add_argument(
+        "--web-host", default="127.0.0.1", metavar="HOST",
+        help="address the web page listens on (default %(default)s: this computer only). "
+        "Any other address, such as 0.0.0.0, requires the access key printed in WEB_URL",
+    )
+    parser.add_argument("--open", action="store_true", help="open the web page in the default browser")
+    parser.add_argument("--headless", action="store_true", help="no web page (recording and logs only)")
+    parser.add_argument("--duration", type=float, help="quit after this many seconds")
+    parser.add_argument(
+        "--snapshot", type=Path, metavar="PNG",
+        help="at exit, save the last video frame (with the hand skeleton) to this image file",
+    )
+    parser.add_argument("--no-bonjour", action="store_true", help="with --wifi: do not advertise on the local network")
+    parser.add_argument("-v", "--verbose", action="store_true")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
+    log = logging.getLogger("glassesdata")
+    if not (args.usb or args.wifi or args.tcp):
+        args.usb = True
+    args.web_host = args.web_host.strip("[]")  # "[::1]" as in a URL
+    if not 0 <= args.web_port <= 65535:
+        log.error("--web-port must be between 0 and 65535")
+        return 2
+    if args.headless and args.open:
+        log.warning("--open does nothing with --headless (there is no web page)")
+
+    tracker_factory = None
+    metadata: dict[str, Any] = {}
+    if not args.no_hands:
+        from .hands import HandTracker, ensure_model, handedness_note
+
+        try:
+            model = ensure_model()
+        except OSError as error:
+            log.error("Could not download the hand model (%s). Continuing without hand tracking.", error)
+        else:
+            tracker_factory = lambda: HandTracker(model, args.max_hands, args.mirrored_input)  # noqa: E731
+            metadata["handedness"] = handedness_note(args.mirrored_input)
+
+    if (args.pair or args.print_pairing) and not args.wifi:
+        log.warning("--pair and --print-pairing only apply with --wifi")
+
+    stop = threading.Event()
+    receiver = Receiver(args.out, tracker_factory, metadata)
+    # Always there, off until started (by --virtual-camera or the web page); pyvirtualcam is
+    # only imported when it starts, and a failure leaves the receiver running.
+    from .vcam import VirtualCamera, parse_size
+
+    virtual_camera = VirtualCamera(
+        receiver, parse_size(args.virtual_camera_size), mode=args.virtual_camera_mode, overlay=args.overlay
+    )
+    workers: list[threading.Thread] = []
+    web = None
+    try:
+        if not args.headless:
+            web = _start_web(args, receiver, virtual_camera, log)
+            if web is None:
+                return 2
+        if args.virtual_camera:
+            virtual_camera.start()  # logs the self-check, or why it cannot start and what to do
+        _run(args, receiver, stop, workers, web, log)
+    finally:
+        # Join everything before the interpreter exits: see Receiver.shutdown.
+        stop.set()
+        virtual_camera.close()  # refuses a start the page may still send while the server stops
+        if web is not None:
+            web.stop()
+        receiver.shutdown()
+        for thread in workers:
+            thread.join(2.0)
+    return 0
+
+
+def _start_web(args: argparse.Namespace, receiver: Receiver, virtual_camera: Any, log: logging.Logger) -> Any:
+    from .web import WebServer, is_loopback_host
+
+    try:
+        web = WebServer(receiver, args.web_host, args.web_port, wifi=args.wifi, pair_at_start=args.pair, vcam=virtual_camera)
+    except OSError as error:
+        log.error(
+            "Cannot serve the web page on %s:%d (%s). Pass --web-port 0 to pick a free port.",
+            args.web_host, args.web_port, error.strerror or error,
+        )
+        return None
+    display = None
+    if not is_loopback_host(args.web_host):
+        if args.web_host in ("0.0.0.0", "::", ""):
+            from .wifi import local_ipv4_addresses
+
+            display = next(iter(local_ipv4_addresses()), None)
+        log.warning(
+            "The web page listens on %s, reachable from other devices: anyone with the key in WEB_URL can watch "
+            "and control recording.", args.web_host or "all interfaces",
+        )
+    web.start()
+    url = web.url(display)
+    print(f"WEB_URL={url}", flush=True)
+    if args.open:
+        import webbrowser
+
+        webbrowser.open(url)
+    return web
+
+
+def _run(
+    args: argparse.Namespace,
+    receiver: Receiver,
+    stop: threading.Event,
+    workers: list[threading.Thread],
+    web: Any,
+    log: logging.Logger,
+) -> None:
+    def start(thread: threading.Thread) -> None:
+        workers.append(thread)
+        thread.start()
+
+    # Handle Ctrl-C and SIGTERM (systemd, kill) the same way on macOS and Linux.
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+
+    if args.usb:
+        from .link import UsbSource
+
+        start(UsbSource(receiver, args.port, stop))
+    if args.tcp:
+        from .link import TcpSource
+
+        host, _, port = args.tcp.rpartition(":")
+        start(TcpSource(receiver, host or "127.0.0.1", int(port), stop))
+    if args.wifi or args.reset_pairing:
+        from . import wifi
+
+        identity = wifi.load_or_create_identity(args.state_dir or paths.state_dir(), reset=args.reset_pairing)
+        if args.wifi:
+            wifi_source = wifi.WifiSource(receiver, identity, args.port, stop, advertise=not args.no_bonjour)
+            start(wifi_source)
+            if wifi_source.wait_ready(timeout=15):
+                uri = wifi.pairing_uri(identity, wifi.local_ipv4_addresses(), wifi_source.port)
+                if web is not None:
+                    web.pairing_png = wifi.qr_png(uri)
+                if args.print_pairing:
+                    print(f"PAIRING_URI={uri}", flush=True)
+                if args.pair:
+                    print(wifi.qr_ascii(uri))
+                    print("Scan this code in the GlassesData iPhone app: Computer card > Pair over Wi-Fi.\n"
+                          "Treat it like a password: anyone who scans it can connect to this receiver.")
+            else:
+                log.error("The Wi-Fi listener did not start; pairing is unavailable.")
+
+    deadline = time.monotonic() + args.duration if args.duration else None
+
+    if args.record:
+        start(threading.Thread(target=_auto_record, args=(receiver, stop), name="gd-auto-record", daemon=True))
+
+    def should_stop() -> bool:
+        return stop.is_set() or (deadline is not None and time.monotonic() >= deadline)
+
+    # The main thread only waits and writes the snapshot at the end (the virtual camera has its own thread).
+    while not should_stop():
+        stop.wait(0.1)
+
+    if args.snapshot is not None:
+        from .viewer import save_snapshot
+
+        frame = receiver.latest_frame() if receiver.busy else None
+        save_snapshot(args.snapshot, frame, receiver.latest_hands(), receiver.hands_active)
+
+
+def _auto_record(receiver: Receiver, stop: threading.Event) -> None:
+    """Start a recording whenever video is flowing and none is running (also after a reconnect)."""
+    while not stop.wait(0.2):
+        status = receiver.status()
+        if status.kind and status.format is not None and status.recording is None and status.received_fps > 0:
+            receiver.start_recording(auto=True)  # logs "Recording to ..." itself
+
+
+if __name__ == "__main__":
+    sys.exit(main())

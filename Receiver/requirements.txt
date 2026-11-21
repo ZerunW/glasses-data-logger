@@ -1,0 +1,13 @@
+# GlassesData receiver, Python 3.11. Lower bounds are the versions it was tested with.
+#
+# Optional: pyvirtualcam>=0.15 for --virtual-camera (also needs OBS). Not installed by default;
+# without it everything else works.
+av>=18.1.0
+cryptography>=50.0.2
+ifaddr>=0.2.0
+mediapipe>=1.2.3
+numpy>=2.4.6
+# mediapipe depends on the contrib build; do not also install opencv-python (two copies of cv2).
+opencv-contrib-python>=5.1.0.95
+qrcode>=8.2
+zeroconf>=0.154.0
