@@ -1,0 +1,7 @@
+// Copy to Signing.local.xcconfig (gitignored) and replace the values.
+// Find your team ID in Xcode Settings → Accounts, or at developer.apple.com/account.
+
+DEVELOPMENT_TEAM = ABCDE12345
+GD_APP_BUNDLE_ID = com.yourname.glassesdata
+GD_TESTS_BUNDLE_ID = com.yourname.glassesdata.tests
+GD_UITESTS_BUNDLE_ID = com.yourname.glassesdata.uitests

@@ -1,0 +1,13 @@
+// Signing defaults shared by every target. Keep personal values out of this file.
+//
+// To sign with your own Apple team, copy Signing.local.xcconfig.example to
+// Signing.local.xcconfig in this folder and fill in your values. That file is
+// gitignored. Set the team there rather than in Xcode's Signing & Capabilities
+// pane, which writes the team ID into project.pbxproj.
+
+DEVELOPMENT_TEAM =
+GD_APP_BUNDLE_ID = com.example.GlassesData
+GD_TESTS_BUNDLE_ID = com.example.GlassesDataTests
+GD_UITESTS_BUNDLE_ID = com.example.GlassesDataUITests
+
+#include? "Signing.local.xcconfig"

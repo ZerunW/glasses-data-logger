@@ -33,3 +33,6 @@ dist/
 # Python test caches
 __pycache__/
 *.pyc
+
+# Personal signing values (see Config/Signing.xcconfig)
+Config/Signing.local.xcconfig
