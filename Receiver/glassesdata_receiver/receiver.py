@@ -17,7 +17,7 @@ the session's own thread sends them, so a TLS socket is never written from two t
 Locks:
 
 * ``_lock`` guards ``_session``, ``_format``, ``_recording``, ``_status``, ``_latest_hands``,
-  ``_device_state``, ``_phone_previous``, ``_inputs`` and ``_latencies``.
+  ``_device_state``, ``_phone_previous``, ``_inputs``, ``_latencies`` and ``_clock_offset_ns``.
 * ``_frame_ready`` (a Condition with its own lock) guards ``_latest_frame`` and ``_latest_epoch``.
 
 Stream epochs: ``_epoch`` grows (under ``_lock``) when a connection starts and when the
@@ -53,6 +53,14 @@ log = logging.getLogger(__name__)
 DECODE_BACKLOG_LIMIT = 48  # about two seconds at 24 fps
 SHUTDOWN_TIMEOUT_S = 5.0
 _STOP = object()  # wakes the decode thread at shutdown
+
+
+def preview_lag_s(phone_time_ns: int | None, offset_ns: int | None, mac_now_ns: int) -> float | None:
+    """How far a frame is behind real time: Mac now minus the frame's phone timestamp mapped to
+    the Mac clock (``mac = phone - offset``, the PING/PONG offset). None without both."""
+    if phone_time_ns is None or offset_ns is None:
+        return None
+    return max(0.0, (mac_now_ns - (phone_time_ns - offset_ns)) / 1e9)
 
 
 class RateMeter:
@@ -116,6 +124,7 @@ class Status:
     last_recording_frames: int = 0
     hands_enabled: bool = False
     hands_error: str | None = None
+    preview_lag_s: float | None = None  # how far the newest decoded frame is behind real time
 
 
 class Receiver:
@@ -124,8 +133,10 @@ class Receiver:
         out_root: Path,
         hand_tracker_factory: Callable[[], Any] | None = None,
         recording_metadata: dict[str, Any] | None = None,
+        state_dir: Path | None = None,
     ) -> None:
         self.out_root = out_root
+        self.state_dir = state_dir  # calibration and body measurements, copied into each new recording
         self._recording_metadata = dict(recording_metadata or {})  # added to every info.json
         self._lock = threading.RLock()
         self._session_gone = threading.Condition(self._lock)
@@ -146,6 +157,7 @@ class Receiver:
         self._hands_meter = RateMeter()
         self._latencies: deque[float] = deque(maxlen=48)
         self._phone_previous: tuple[int, dict[str, Any]] | None = None
+        self._clock_offset_ns: int | None = None  # phone minus Mac, from the best PING/PONG sample
         self._inputs: deque[dict[str, Any]] = deque(maxlen=8)
         self._stop = threading.Event()
         self._decode_errors = 0  # written by the decode thread only
@@ -189,6 +201,7 @@ class Receiver:
             self._inputs.clear()
             self._latencies.clear()
             self._phone_previous = None
+            self._clock_offset_ns = None
             self._status.rtt_ms = None
             self._latest_hands = None
             self._auto_record_blocked = False
@@ -273,7 +286,10 @@ class Receiver:
                 log.debug("Ignoring CONTROL command %r", command)
 
     def clock_sample(self, session: Session, sample: ClockSample) -> None:
+        best = session.clock.best  # read here, on the session's own thread
         with self._lock:
+            if session is self._session and best is not None:
+                self._clock_offset_ns = best.offset_ns
             self._status.rtt_ms = sample.rtt_ns / 1e6
             self._record(
                 lambda recording: recording.write_clock(
@@ -468,6 +484,7 @@ class Receiver:
             status.sources = dict(self._status.sources)
             status.inputs = list(self._inputs)
             latencies = sorted(self._latencies)
+            offset_ns = self._clock_offset_ns if self._session is not None else None
             if self._recording is not None:
                 status.recording = self._recording.directory
                 status.recording_s = self._recording.duration_s
@@ -479,6 +496,8 @@ class Receiver:
         status.decode_backlog = self._decode_queue.qsize()
         status.decode_errors = self._decode_errors
         status.hands_enabled = self.hands_active
+        frame = self.latest_frame()
+        status.preview_lag_s = preview_lag_s(frame.phone_time_ns if frame else None, offset_ns, time.monotonic_ns())
         return status
 
     def toggle_recording(self) -> str:
@@ -563,7 +582,7 @@ class Receiver:
             "app": session.hello.get("app") if session else None,
         }
         try:
-            self._recording = Recording(self.out_root, self._format, metadata)
+            self._recording = Recording(self.out_root, self._format, metadata, setup_dir=self.state_dir)
         except Exception as error:
             self._recording_failed(error)
             return

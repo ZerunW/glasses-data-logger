@@ -27,7 +27,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--reset-pairing", action="store_true", help="forget the paired iPhone: new certificate and token")
     parser.add_argument(
         "--state-dir", type=Path, metavar="DIR",
-        help=f"where the Wi-Fi identity lives: certificate, key, pairing.json (default {paths.state_dir()})",
+        help="where the receiver keeps its state: the Wi-Fi identity (certificate, key, pairing.json), the camera "
+        f"calibration (calibration/) and the body measurements (profile.json) (default {paths.state_dir()})",
     )
     parser.add_argument(
         "--print-pairing", action="store_true",
@@ -108,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         log.warning("--pair and --print-pairing only apply with --wifi")
 
     stop = threading.Event()
-    receiver = Receiver(args.out, tracker_factory, metadata)
+    receiver = Receiver(args.out, tracker_factory, metadata, state_dir=args.state_dir or paths.state_dir())
     # Always there, off until started (by --virtual-camera or the web page); pyvirtualcam is
     # only imported when it starts, and a failure leaves the receiver running.
     from .vcam import VirtualCamera, parse_size

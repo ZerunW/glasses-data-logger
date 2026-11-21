@@ -9,6 +9,11 @@ keep their source clock domain:
 * ``mac_time_ns``    Mac monotonic clock (``time.monotonic_ns``) when it arrived here
 
 ``clock.csv`` holds the PING/PONG samples used to map the phone clock onto the Mac clock.
+
+When the receiver has a state folder, a new recording also gets a copy of the camera
+calibration (``calibration.json``) and the body measurements (``profile.json``) in use
+when it started (PIPELINE.md sections 3 and 4); ``info.json`` says what was copied, or why
+nothing was.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import shutil
 import threading
 import time
 from datetime import datetime
@@ -25,7 +31,7 @@ from typing import Any, Iterable
 
 import av
 
-from . import __version__
+from . import __version__, paths
 from .hevc import hvcc_to_annexb, length_prefixed_to_annexb
 from .protocol import VideoFormat, VideoPacket
 
@@ -69,10 +75,72 @@ def _vector(body: dict[str, Any], key: str, size: int) -> list[Any]:
     return [""] * size
 
 
+def attach_setup_files(state_dir: Path | None, directory: Path, fmt: VideoFormat) -> dict[str, Any]:
+    """Copy the current calibration and body measurements into a new recording.
+
+    Returns the ``info.json`` entries that describe them: ``calibration`` and ``profile``,
+    each ``{"file": name or None, ...}`` with a ``note`` when something is missing or the
+    calibration was made at another video size (it is still copied; the pipeline rescales K
+    for the same aspect ratio and refuses a different one).
+    """
+    calibration: dict[str, Any] = {"file": None}
+    profile: dict[str, Any] = {"file": None}
+    if state_dir is None:
+        calibration["note"] = profile["note"] = "this receiver runs without a state folder"
+        return {"calibration": calibration, "profile": profile}
+
+    source = paths.current_calibration(state_dir)
+    data = _read_json_object(source)
+    if data is None:
+        calibration["note"] = (
+            "no camera calibration saved on this computer (calibrate on the web page): "
+            "the pipeline uses its default camera"
+            if not source.exists() else f"{source} is not a valid calibration: not copied"
+        )
+    else:
+        shutil.copyfile(source, directory / "calibration.json")
+        calibration = {
+            "file": "calibration.json",
+            **{key: data.get(key) for key in ("model", "width", "height", "rms_px", "created", "source")},
+        }
+        width, height = data.get("width"), data.get("height")
+        if (width, height) != (fmt.width, fmt.height):
+            same_aspect = (
+                isinstance(width, int) and isinstance(height, int) and height > 0 and fmt.height > 0
+                and abs(width / height - fmt.width / fmt.height) <= 0.01 * fmt.width / fmt.height
+            )
+            calibration["note"] = (
+                f"calibrated at {width}x{height}, this video is {fmt.width}x{fmt.height}: "
+                + ("same aspect ratio, the pipeline rescales K" if same_aspect
+                   else "different aspect ratio, the pipeline will refuse it; calibrate again at this size")
+            )
+
+    source = paths.profile_path(state_dir)
+    data = _read_json_object(source)
+    if data is None:
+        profile["note"] = (
+            "no body measurements saved on this computer (enter them on the web page): the pipeline uses adult averages"
+            if not source.exists() else f"{source} is not valid: not copied"
+        )
+    else:
+        shutil.copyfile(source, directory / "profile.json")
+        measured = data.get("measured") if isinstance(data.get("measured"), dict) else {}
+        profile = {"file": "profile.json", "measured": sorted(key for key, value in measured.items() if value is True)}
+    return {"calibration": calibration, "profile": profile}
+
+
+def _read_json_object(path: Path) -> dict[str, Any] | None:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 class Recording:
     """Thread-safe: rows may arrive from the network, decode and hand-tracking threads."""
 
-    def __init__(self, root: Path, fmt: VideoFormat, metadata: dict[str, Any]) -> None:
+    def __init__(self, root: Path, fmt: VideoFormat, metadata: dict[str, Any], setup_dir: Path | None = None) -> None:
         self._lock = threading.Lock()
         self.format = fmt
         self.directory = self._make_directory(root)
@@ -94,6 +162,10 @@ class Recording:
         self._device = self._open_csv("device_state.csv", DEVICE_HEADER)
         self._clock = self._open_csv("clock.csv", CLOCK_HEADER)
         self._hands = self._open_csv("hands.csv", HANDS_HEADER)
+        try:
+            self._metadata.update(attach_setup_files(setup_dir, self.directory, fmt))
+        except OSError as error:  # a copy failing must not stop the recording
+            self._metadata["calibration"] = self._metadata["profile"] = {"file": None, "note": f"could not copy: {error}"}
         self._write_info()
 
     # ------------------------------------------------------------ video

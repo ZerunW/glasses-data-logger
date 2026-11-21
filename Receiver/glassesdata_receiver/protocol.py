@@ -11,6 +11,12 @@ same byte fixtures (see ``tests/test_protocol.py`` and ``LinkProtocolTests.swift
 Phone -> receiver: HELLO, VIDEO_FORMAT, VIDEO, MOTION, INPUT, DEVICE_STATE, STATS, PONG, CONTROL.
 Receiver -> phone: HELLO_ACK, PING, RECORDER_STATE.
 
+STATS (0x30, phone -> receiver, once a second) is a JSON object of counters: ``t``,
+``glasses_frames``, ``sent_frames``, ``dropped_frames``, ``motion_samples``, ``queue_bytes``
+and, from newer phones, ``queue_frames`` (video frames not sent yet), ``record_priority``
+(true while the phone buffers video instead of dropping it because the receiver records)
+and ``gaps`` (drop episodes since connecting). The receiver ignores keys it does not know.
+
 Remote record control (JSON bodies, like the other JSON messages):
 
 * ``CONTROL`` (0x50, phone -> receiver)::

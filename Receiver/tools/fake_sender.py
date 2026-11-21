@@ -14,6 +14,11 @@ Remote record control, like the app's Record button: ``--record-after 2 --record
 sends CONTROL record_start 2 s after the connection and record_stop 5 s later. Every
 RECORDER_STATE from the receiver is printed as ``RECORDER_STATE {json}``.
 
+STATS carries ``queue_frames``, ``record_priority`` (true while the receiver says it is
+recording, like the app, which then buffers instead of dropping) and ``gaps`` (drop
+episodes). ``--lag-ms MS`` stamps every frame MS earlier, as if the phone had queued it
+that long: the receiver's preview then runs MS behind.
+
 VIDEO must hold an HEVC track without B-frames, like the glasses stream.
 """
 
@@ -67,7 +72,9 @@ def serve(sock: socket.socket, fmt: p.VideoFormat, packets: list[tuple[bytes, in
     frame_interval = 1 / (args.fps or fmt.fps)
     duration_us = packets[-1][1] + int(frame_interval * 1e6)
     started = time.monotonic()
-    sent = dropped = motion = index = 0
+    sent = dropped = motion = index = gaps = 0
+    receiver_recording = False
+    lag_ns = int(args.lag_ms * 1_000_000)
     next_frame = next_motion = next_stats = started
     loops = 0
     # Remote record control: (time, command) pairs still to send.
@@ -88,8 +95,9 @@ def serve(sock: socket.socket, fmt: p.VideoFormat, packets: list[tuple[bytes, in
             data, pts, keyframe = packets[index]
             if args.drop_every and sent and (sent + dropped) % args.drop_every == 0 and not keyframe:
                 dropped += 1
+                gaps += 1
             else:
-                sock.sendall(p.encode_video(p.VideoPacket(keyframe, pts + loops * duration_us, phone_now(), data)))
+                sock.sendall(p.encode_video(p.VideoPacket(keyframe, pts + loops * duration_us, phone_now() - lag_ns, data)))
                 sent += 1
             index += 1
             if index == len(packets):
@@ -112,7 +120,8 @@ def serve(sock: socket.socket, fmt: p.VideoFormat, packets: list[tuple[bytes, in
         if now >= next_stats:
             sock.sendall(p.encode_json(p.MessageType.STATS, {
                 "t": phone_now(), "glasses_frames": sent + dropped, "sent_frames": sent, "dropped_frames": dropped,
-                "motion_samples": motion, "queue_bytes": 0}))
+                "motion_samples": motion, "queue_bytes": 0, "queue_frames": round(args.lag_ms / 1000 * (args.fps or fmt.fps)),
+                "record_priority": receiver_recording, "gaps": gaps}))
             next_stats += 1.0
         due = [next_frame, next_motion, next_stats] + [at for at, _ in controls[:1]]
         timeout = max(0.0, min(due) - time.monotonic())
@@ -134,6 +143,7 @@ def serve(sock: socket.socket, fmt: p.VideoFormat, packets: list[tuple[bytes, in
                     if not message.body.get("ok"):
                         return
                 elif message.type is p.MessageType.RECORDER_STATE:
+                    receiver_recording = bool(message.body.get("recording"))
                     print("RECORDER_STATE", json.dumps(message.body, sort_keys=True))
 
 
@@ -149,6 +159,7 @@ def main() -> int:
     parser.add_argument("--fps", type=float, help="override the frame rate")
     parser.add_argument("--drop-every", type=int, default=0, help="simulate the phone dropping every Nth frame")
     parser.add_argument("--clock-skew-ms", type=int, default=123_456, help="offset of the simulated phone clock")
+    parser.add_argument("--lag-ms", type=float, default=0.0, help="stamp every frame this much earlier (a phone that queued it)")
     parser.add_argument("--record-after", type=float, metavar="N", help="send CONTROL record_start N seconds after connecting")
     parser.add_argument("--record-for", type=float, metavar="M", help="with --record-after: send record_stop M seconds later")
     args = parser.parse_args()

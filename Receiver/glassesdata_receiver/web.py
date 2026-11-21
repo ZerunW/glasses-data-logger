@@ -21,6 +21,14 @@ Standard library only (``http.server``). Endpoints (all JSON is UTF-8):
 ``/api/vcam/stop``          POST    stop the virtual camera
 ``/api/vcam/settings``      POST    JSON body with any of ``mode`` ("fit"/"fill"), ``position`` (0..1),
                                     ``overlay`` (bool)
+``/api/calibration``        GET     the camera calibration: saved screen scale, the current
+                                    calibration, the capture session (views, coverage, guidance)
+``/api/calibration/...``    GET     ``board.png`` (the board to show), ``preview.jpg`` (the last look,
+                                    corners drawn), ``undistorted.jpg`` (the solution's check picture)
+``/api/calibration/...``    POST    ``screen``, ``start``, ``capture``, ``solve``, ``save``, ``reset``
+                                    (see ``calibration.CalibrationService``)
+``/api/profile``            GET     body measurements, the form's fields and defaults
+``/api/profile``            POST    JSON body ``{key: metres | null}``: save body measurements
 ==========================  ======  ==============================================================
 
 POST requests must carry the header ``X-GlassesData: 1`` (a cross-site page cannot add
@@ -69,6 +77,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import cv2
 
+from . import bodyprofile, paths
+from .calibration import CalibrationService
 from .decoder import DecodedFrame
 from .receiver import HandsResult, Receiver
 from .viewer import annotate, hands_for
@@ -129,6 +139,14 @@ def _settings_message(changes: dict[str, Any]) -> str:
     return "Virtual camera: " + ", ".join(parts)
 
 
+def _refuse_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not a number")
+
+
+def _int_or_none(value: Any) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) and value >= 0 else None
+
+
 def _clean(value: Any) -> Any:
     """JSON from the phone may hold NaN or Infinity (Python accepts them); browsers do not."""
     if isinstance(value, float):
@@ -184,6 +202,12 @@ def status_payload(receiver: Receiver, wifi: dict[str, Any], vcam: "VirtualCamer
             "display_skipped": status.skipped_for_backlog,
             "decode_errors": status.decode_errors,
             "decode_backlog": status.decode_backlog,
+            "preview_lag_s": _rounded(status.preview_lag_s, 3),
+            # Newer phones: video frames waiting to be sent, whether they buffer instead of
+            # dropping while this computer records, and drop episodes since connecting.
+            "phone_queue_frames": _int_or_none(status.phone.get("queue_frames")),
+            "phone_record_priority": status.phone.get("record_priority") if isinstance(status.phone.get("record_priority"), bool) else None,
+            "phone_gaps": _int_or_none(status.phone.get("gaps")),
         },
         "hands": {
             "available": receiver.hands_available,
@@ -570,9 +594,14 @@ class WebServer:
         pair_at_start: bool = False,
         require_key: bool | None = None,
         vcam: "VirtualCamera | None" = None,
+        state_dir: Path | None = None,
     ) -> None:
         self.receiver = receiver
         self.vcam = vcam
+        # calibration and body measurements live here (default: the receiver's state folder)
+        self.state_dir = state_dir if state_dir is not None else receiver.state_dir
+        self.calibration = CalibrationService(receiver, self.state_dir)
+        self._profile_lock = threading.Lock()
         self.host = host
         self.loopback = is_loopback_host(host)
         needs_key = (not self.loopback) if require_key is None else require_key
@@ -614,6 +643,7 @@ class WebServer:
 
     def stop(self) -> None:
         self._stop.set()
+        self.calibration.close()
         self.feed.wake()
         self.live_feed.wake()
         if self._thread.is_alive():
@@ -646,6 +676,34 @@ class WebServer:
 
     def page(self) -> bytes:
         return PAGE.read_bytes()
+
+    def profile(self) -> dict[str, Any]:
+        path = paths.profile_path(self.state_dir) if self.state_dir is not None else None
+        profile, note = bodyprofile.load(path) if path is not None else (bodyprofile.defaults(), None)
+        return {
+            "profile": profile,
+            "fields": bodyprofile.fields(),
+            "file": str(path) if path is not None else None,
+            "saved": bool(path is not None and path.is_file()),
+            "note": note,
+        }
+
+    def save_profile(self, changes: Any) -> tuple[int, dict[str, Any]]:
+        if self.state_dir is None:
+            return HTTPStatus.CONFLICT, {"ok": False, "message": "This receiver has no state folder to save to"}
+        path = paths.profile_path(self.state_dir)
+        with self._profile_lock:
+            current, _ = bodyprofile.load(path)
+            profile, errors = bodyprofile.update(current, changes)
+            if errors:
+                message = "Not saved: " + "; ".join(errors.values())
+                return HTTPStatus.BAD_REQUEST, {"ok": False, "message": message, "errors": errors}
+            bodyprofile.save(path, profile)
+        count = sum(1 for key in bodyprofile.MEASURABLE if profile["measured"][key])
+        return HTTPStatus.OK, {
+            "ok": True, "message": f"Body measurements saved: {count} of {len(bodyprofile.MEASURABLE)} measured",
+            **self.profile(),
+        }
 
 
 _SECURITY_HEADERS = {
@@ -785,6 +843,21 @@ class _Handler(BaseHTTPRequestHandler):
                 self._text(HTTPStatus.NOT_FOUND, "The virtual camera is off.")
             else:
                 self._send(HTTPStatus.OK, jpeg, "image/jpeg")
+        elif path == "/api/calibration":
+            self._json(HTTPStatus.OK, _clean(app.calibration.state()))
+        elif path in ("/api/calibration/board.png", "/api/calibration/preview.jpg", "/api/calibration/undistorted.jpg"):
+            data, kind, missing = {
+                "/api/calibration/board.png": (app.calibration.board_png, "image/png", "No calibration is running."),
+                "/api/calibration/preview.jpg": (app.calibration.preview_jpeg, "image/jpeg", "Nothing seen yet."),
+                "/api/calibration/undistorted.jpg": (app.calibration.undistorted_jpeg, "image/jpeg", "Not solved yet."),
+            }[path]
+            body = data()
+            if body is None:
+                self._text(HTTPStatus.NOT_FOUND, missing)
+            else:
+                self._send(HTTPStatus.OK, body, kind)
+        elif path == "/api/profile":
+            self._json(HTTPStatus.OK, app.profile())
         elif path == "/api/stream.mjpg":
             self._stream(app.feed)
         elif path == "/api/live.mjpg":
@@ -806,6 +879,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if urlsplit(self.path).path.startswith("/api/vcam/"):
             self._vcam_post(urlsplit(self.path).path, body, length)
+            return
+        if urlsplit(self.path).path.startswith("/api/calibration/") or urlsplit(self.path).path == "/api/profile":
+            self._setup_post(urlsplit(self.path).path, body, length)
             return
         receiver = self.app.receiver
         path = urlsplit(self.path).path
@@ -854,6 +930,46 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": f"Not changed: {error}", "vcam": vcam.status()})
                 return
             self._json(HTTPStatus.OK, {"ok": True, "message": _settings_message(changes), "vcam": vcam.status()})
+
+    def _setup_post(self, path: str, body: bytes, length: int) -> None:
+        """Calibration and body measurements. Every body is a JSON object (or empty)."""
+        service = self.app.calibration
+        actions = {
+            "/api/calibration/screen": service.save_screen,
+            "/api/calibration/start": service.start,
+            "/api/calibration/capture": service.capture,
+            "/api/calibration/solve": lambda _: service.solve(),
+            "/api/calibration/save": lambda _: service.save(),
+            "/api/calibration/reset": lambda _: service.reset(),
+            "/api/profile": self.app.save_profile,
+        }
+        action = actions.get(path)
+        if action is None:
+            self._json(HTTPStatus.NOT_FOUND, {"ok": False, "message": "Not found"})
+            return
+        try:
+            data = self._json_body(body, length)
+            status, payload = action(data)
+        except ValueError as error:
+            self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "message": f"Not done: {error}"})
+            return
+        except OSError as error:
+            log.error("Could not save: %s", error)
+            self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "message": f"Could not save: {error.strerror or error}"})
+            return
+        self._json(status, _clean(payload))
+
+    @staticmethod
+    def _json_body(body: bytes, length: int) -> Any:
+        """The body as JSON (None when empty)."""
+        if length < 0 or length > MAX_POST_BODY:
+            raise ValueError("the body is too large")
+        if not body:
+            return None
+        try:
+            return json.loads(body.decode("utf-8"), parse_constant=_refuse_constant)
+        except (UnicodeDecodeError, ValueError):
+            raise ValueError("the body is not JSON") from None
 
     @staticmethod
     def _settings_body(body: bytes, length: int) -> dict[str, Any]:

@@ -45,3 +45,21 @@ def recordings_dir() -> Path:
     if _is_macos():
         return Path.home() / "Movies" / APP
     return Path.home() / "Videos" / APP
+
+
+# Files in the state folder that every new recording gets a copy of (PIPELINE.md sections 3 and 4).
+
+
+def calibration_dir(state: Path) -> Path:
+    """Camera calibrations: one timestamped file per save, ``current.json`` and ``screen.json``."""
+    return state / "calibration"
+
+
+def current_calibration(state: Path) -> Path:
+    """The calibration copied into new recordings as ``calibration.json``."""
+    return calibration_dir(state) / "current.json"
+
+
+def profile_path(state: Path) -> Path:
+    """Body measurements, copied into new recordings as ``profile.json``."""
+    return state / "profile.json"

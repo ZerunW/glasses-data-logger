@@ -180,9 +180,14 @@ def test_status_json_shape_with_a_fake_sender(live):
     assert set(video) == {
         "format", "has_frame", "glasses_fps", "phone_sent_fps", "received_fps", "decoded_fps", "phone_dropped_frames",
         "phone_dropped_fps", "delay_ms", "rtt_ms", "display_skipped", "decode_errors", "decode_backlog",
+        "preview_lag_s", "phone_queue_frames", "phone_record_priority", "phone_gaps",
     }
     assert video["format"] == {"width": 540, "height": 960, "fps": 30} and video["has_frame"] is True
     assert video["received_fps"] > 0 and video["decoded_fps"] > 0
+    wait_until(lambda: None not in [json.loads(request(live.base + "/api/status")[2])["video"][key] for key in ("phone_gaps", "preview_lag_s")])
+    video = json.loads(request(live.base + "/api/status")[2])["video"]
+    assert (video["phone_queue_frames"], video["phone_record_priority"], video["phone_gaps"]) == (0, False, 0)
+    assert 0 <= video["preview_lag_s"] < 0.5  # a local sender with no queue: the newest frame is fresh
     assert set(data["hands"]) == {"available", "enabled", "error", "fps", "process_ms", "count", "detected"}
     assert data["hands"]["available"] is False  # this receiver has no tracker
     assert set(data["motion"]) == {"accel", "gyro", "mag", "source", "samples_per_s"}

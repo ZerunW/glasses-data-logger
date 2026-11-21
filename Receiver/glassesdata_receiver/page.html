@@ -742,6 +742,223 @@ dialog p strong { color: var(--text); font-weight: 600; }
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
 
+/* ------------------------------------------------------------------ preview lag (top bar) */
+#lag-pill { color: var(--warn); background: var(--warn-weak); border-color: transparent; font-weight: 600; flex: none; }
+#lag-pill svg.i { color: var(--warn); }
+#lag-pill.bad { color: var(--bad); background: var(--bad-weak); }
+#lag-pill.bad svg.i { color: var(--bad); }
+
+/* ------------------------------------------------------------------ setup: calibration and body cards */
+.btn.primary { background: var(--accent); border-color: transparent; color: var(--accent-ink); }
+.btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 86%, var(--text)); border-color: transparent; }
+.btn.primary svg.i { color: currentColor; }
+.btn.icon { width: 36px; padding: 0; justify-content: center; }
+.setup-hero { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.setup-hero .unit { margin-left: 6px; }
+.setup-note { margin: 0; color: var(--text-2); font-size: var(--fs-small); line-height: 1.5; }
+.setup-foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; min-width: 0; }
+.setup-foot .faint { font-size: var(--fs-small); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setup-foot .warn { font-size: var(--fs-small); display: inline-flex; gap: 6px; align-items: center; min-width: 0; }
+.measures { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.measure { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 7px 10px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--line); min-width: 0; font-size: var(--fs-small); }
+.measure span { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.measure b { font-weight: 600; white-space: nowrap; }
+.measure.default b { color: var(--text-3); font-weight: 500; }
+
+/* ------------------------------------------------------------------ calibration flow (covers the page while open) */
+.flow { position: fixed; inset: 0; z-index: 60; display: flex; flex-direction: column; background: var(--bg); }
+.flow-bar { height: var(--topbar-h); flex: none; display: flex; align-items: center; gap: 12px; padding: 0 var(--pad) 0 20px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.flow-bar h2 { margin: 0; font-size: var(--fs-title); font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; }
+.steps { display: flex; align-items: center; gap: 8px; margin: 0 auto; padding: 0; list-style: none; counter-reset: step; min-width: 0; }
+.steps li { counter-increment: step; display: flex; align-items: center; gap: 8px; color: var(--text-3); font-size: var(--fs-small); font-weight: 600; white-space: nowrap; }
+.steps li::before { content: counter(step); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none; background: var(--surface-3); color: var(--text-2); font-size: var(--fs-label); font-weight: 700; }
+.steps li:not(:last-child)::after { content: ""; width: 28px; height: 1px; background: var(--line-strong); margin-left: 2px; }
+.steps li[aria-current="step"] { color: var(--text); }
+.steps li[aria-current="step"]::before { background: var(--accent); color: var(--accent-ink); }
+.steps li.done::before { content: "✓"; background: var(--accent-weak); color: var(--accent); }
+.flow-body { flex: 1; min-height: 0; overflow: auto; padding: 28px var(--pad) 40px; }
+.step { max-width: 1120px; margin: 0 auto; }
+.step-grid { display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr); gap: 28px; align-items: start; }
+.step-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.step h3 { margin: 0; font-size: 21px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.2; }
+.step .lead { margin: 6px 0 0; color: var(--text-2); line-height: 1.55; }
+.step .lead b { color: var(--text); font-weight: 600; }
+.howto { margin: 0; padding: 0; list-style: none; counter-reset: how; display: flex; flex-direction: column; gap: 10px; }
+.howto li { counter-increment: how; display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; color: var(--text-2); font-size: var(--fs-small); line-height: 1.5; }
+.howto li::before { content: counter(how); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; background: var(--surface-3); color: var(--text); font-size: var(--fs-label); font-weight: 700; }
+.howto b { color: var(--text); font-weight: 600; }
+.step-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.step-actions .btn { height: 40px; }
+.status-line { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--line); font-size: var(--fs-small); color: var(--text); }
+.status-line .dot { flex: none; }
+.callout-warn { display: flex; gap: 8px; align-items: flex-start; padding: 9px 12px; border-radius: var(--r-md); background: var(--warn-weak); border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); font-size: var(--fs-small); line-height: 1.45; }
+.callout-warn svg.i { color: var(--warn); margin-top: 1px; }
+
+/* step 1: the card */
+.scale-ctl { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; gap: 8px; align-items: stretch; }
+.scale-ctl .btn { height: auto; min-height: 52px; padding: 0; justify-content: center; font-size: 20px; font-weight: 500; }
+.scale-readout { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 6px 10px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--line); min-width: 0; }
+.scale-readout b { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; line-height: 1.2; }
+.scale-readout small { color: var(--text-2); font-size: var(--fs-small); white-space: nowrap; }
+.card-stage {
+  position: relative; min-height: clamp(420px, calc(100dvh - var(--topbar-h) - 96px), 720px); padding: 44px 40px 40px 52px; overflow: auto;
+  border-radius: var(--r-xl); border: 1px solid var(--line); background-color: var(--surface);
+  background-image: radial-gradient(circle at 1px 1px, var(--line-strong) 1px, transparent 0); background-size: 18px 18px;
+}
+.card-outline { position: relative; box-sizing: border-box; border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); box-shadow: 0 0 0 6px var(--accent-weak), var(--shadow); touch-action: none; }
+.card-outline .chip { position: absolute; border-radius: 18%; background: linear-gradient(135deg, color-mix(in srgb, var(--warn) 55%, var(--surface)), color-mix(in srgb, var(--warn) 30%, var(--surface))); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--warn) 50%, transparent); }
+.card-outline .card-hint { position: absolute; left: 0; right: 0; bottom: 14%; text-align: center; color: var(--text-2); font-size: var(--fs-small); font-weight: 550; pointer-events: none; }
+.card-dim { position: absolute; color: var(--accent); font: 600 var(--fs-label)/1 var(--mono); white-space: nowrap; display: flex; align-items: center; gap: 6px; }
+.card-dim::before, .card-dim::after { content: ""; flex: 1; height: 1px; background: color-mix(in srgb, var(--accent) 55%, transparent); }
+.card-dim.w { left: 0; right: 0; top: -24px; }
+.card-dim.h { top: 0; bottom: 0; left: -30px; width: 12px; flex-direction: column; justify-content: center; }
+.card-dim.h::before, .card-dim.h::after { width: 1px; height: auto; flex: 1; }
+.card-dim.h span { writing-mode: vertical-rl; transform: rotate(180deg); }
+.card-anchor { position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; border-left: 2px solid var(--text); border-top: 2px solid var(--text); pointer-events: none; }
+.card-handle {
+  position: absolute; right: -15px; bottom: -15px; width: 30px; height: 30px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); cursor: nwse-resize; touch-action: none;
+  box-shadow: 0 0 0 4px var(--surface), 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+.card-handle svg.i { width: 16px; height: 16px; stroke-width: 2; }
+.screen-size { font-size: var(--fs-small); color: var(--text-2); }
+
+/* step 2: capture */
+.board-thumb { position: relative; border-radius: var(--r-xl); border: 1px solid var(--line); background: var(--surface); padding: 24px; display: grid; place-items: center; min-height: clamp(320px, calc(100dvh - var(--topbar-h) - 96px), 640px); }
+.board-thumb img { max-width: 100%; max-height: 520px; display: block; background: #fff; padding: 10px; border-radius: 6px; box-shadow: var(--shadow); }
+.board-thumb .faint { text-align: center; max-width: 340px; font-size: var(--fs-small); margin: 0; }
+.board-ghost { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.board-ghost i {
+  display: block; width: min(360px, 70%); aspect-ratio: 4 / 3; border-radius: 10px; opacity: 0.9;
+  background: repeating-conic-gradient(var(--surface-3) 0 25%, transparent 0 50%) 0 0 / 25% 33.34%;
+  box-shadow: 0 0 0 1px var(--line), 0 0 0 10px var(--surface-2);
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 35%, transparent 78%); mask-image: radial-gradient(ellipse at center, #000 35%, transparent 78%);
+}
+.progress-card { display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); }
+.progress-top { display: flex; align-items: baseline; gap: 6px; }
+.progress-top .big { font-size: 26px; }
+.progress-top .aside { margin-left: auto; font-size: var(--fs-small); color: var(--text-2); }
+.bar { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--accent); transition: width 0.3s var(--ease); }
+.bar.good i { background: var(--good); }
+
+/* step 3: result */
+.result-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 420px); gap: 24px; align-items: start; }
+.undist { margin: 0; border-radius: var(--r-xl); overflow: hidden; background: var(--surface); border: 1px solid var(--line); }
+.undist-pic { position: relative; background: var(--stage); aspect-ratio: 1110 / 1000; }
+.undist-pic img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; display: block; }
+.undist figcaption { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 10px 14px; font-size: var(--fs-small); color: var(--text-2); border-top: 1px solid var(--line); }
+.undist figcaption b { color: var(--text); font-weight: 600; display: block; }
+.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.metric { padding: 12px 14px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); min-width: 0; }
+.metric .big { display: block; margin-top: 4px; }
+.metric small { display: block; color: var(--text-2); font-size: var(--fs-small); margin-top: 2px; }
+.metric.good .big { color: var(--good); }
+.metric.warn .big { color: var(--warn); }
+.metric.bad .big { color: var(--bad); }
+.why { display: flex; gap: 8px; align-items: flex-start; font-size: var(--fs-small); color: var(--text-2); line-height: 1.5; }
+.why svg.i { color: var(--accent); margin-top: 1px; }
+.result-panel { padding: 14px 16px; border-radius: var(--r-lg); background: var(--surface); border: 1px solid var(--line); }
+.result-panel .kv { margin-top: 0; font-size: var(--fs-small); }
+.result-panel .kv dd { font-family: var(--mono); font-size: var(--fs-small); }
+.bars { display: flex; align-items: flex-end; gap: 2px; height: 64px; margin-top: 8px; padding-bottom: 1px; border-bottom: 1px solid var(--line-strong); }
+.bars i { flex: 1; min-width: 2px; min-height: 2px; border-radius: 2px 2px 0 0; background: var(--accent); opacity: 0.85; }
+.bars i.dropped { background: var(--bad); opacity: 0.55; }
+.bars-legend { display: flex; justify-content: space-between; font-size: var(--fs-label); color: var(--text-3); margin-top: 4px; }
+.solving { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 360px; color: var(--text-2); text-align: center; }
+.solving .spinner { width: 28px; height: 28px; border-width: 3px; }
+.saved-banner { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: var(--r-md); background: var(--good-weak); color: var(--good); font-weight: 600; font-size: var(--fs-small); }
+
+/* the board itself: full screen, white, exact device pixels; the HUD sits beside it */
+.board-view { position: fixed; inset: 0; z-index: 80; background: #fff; overflow: hidden; color-scheme: dark; cursor: default; }
+.board-view > img { position: absolute; display: block; image-rendering: pixelated; user-select: none; -webkit-user-drag: none; pointer-events: none; }
+.hud {
+  --surface: #111114; --surface-2: #1f1f24; --surface-3: #2a2a31; --raised: #2a2a31;
+  --line: rgba(255, 255, 255, 0.08); --line-strong: rgba(255, 255, 255, 0.14);
+  --text: #ececf1; --text-2: #a3a3ae; --text-3: #8a8a95; --accent: #8189ff; --accent-ink: #0b0b12; --accent-weak: rgba(129, 137, 255, 0.16);
+  --good: #3ecf8e; --warn: #f5b546; --bad: #ff6b6b;
+  position: absolute; z-index: 2; display: flex; flex-direction: column; gap: 14px; width: 256px; padding: 18px;
+  border-radius: 22px; background: var(--surface); color: var(--text); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
+.hud-count { display: flex; align-items: baseline; gap: 8px; }
+.hud-count b { font-size: 44px; font-weight: 650; line-height: 1; letter-spacing: -0.035em; }
+.hud-count span { color: var(--text-2); font-size: 15px; font-weight: 550; }
+.hud .bar { background: var(--surface-3); }
+.hud-guide { font-size: 19px; font-weight: 650; line-height: 1.25; letter-spacing: -0.01em; min-height: 2.5em; display: flex; align-items: center; gap: 10px; border-radius: 12px; padding: 10px 12px; background: var(--surface-2); }
+.hud-guide svg.i { width: 20px; height: 20px; flex: none; color: var(--accent); }
+.hud-guide.got { animation: hud-got 1s var(--ease); }
+.hud-guide.got svg.i { color: var(--good); }
+.hud-maps { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.hud-maps figure { margin: 0; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.hud-maps canvas, .hud-maps img { width: 100%; aspect-ratio: var(--video-ar, 9 / 16); display: block; border-radius: 10px; background: var(--surface-2); object-fit: cover; }
+.hud-maps figcaption { font-size: 10px; color: var(--text-3); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 650; }
+.hud-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.hud-stats div { padding: 7px 8px; border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.hud-stats small { display: block; font-size: 10px; color: var(--text-3); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 650; }
+.hud-stats b { display: block; font-size: 15px; font-weight: 600; margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hud-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.hud-actions .btn { height: 40px; justify-content: center; }
+.hud.bottom {
+  width: auto; max-width: 640px; margin: 0 auto; display: grid; gap: 10px 12px; padding: 14px; border-radius: 18px;
+  grid-template-columns: minmax(0, 1fr) 76px 76px;
+  grid-template-areas: "count cov prev" "bar cov prev" "guide cov prev" "stats stats stats" "actions actions actions";
+}
+.hud.bottom .hud-count { grid-area: count; }
+.hud.bottom .hud-count b { font-size: 34px; }
+.hud.bottom > .bar { grid-area: bar; align-self: center; }
+.hud.bottom .hud-guide { grid-area: guide; font-size: 16px; min-height: 0; padding: 8px 10px; }
+.hud.bottom .hud-maps { display: contents; }
+.hud.bottom .hud-maps figure:first-child { grid-area: cov; }
+.hud.bottom .hud-maps figure:last-child { grid-area: prev; }
+.hud.bottom .hud-stats { grid-area: stats; }
+.hud.bottom .hud-actions { grid-area: actions; }
+@keyframes hud-got { 0% { background: color-mix(in srgb, var(--good) 35%, var(--surface-2)); } 100% { background: var(--surface-2); } }
+
+/* ------------------------------------------------------------------ body measurements dialog */
+dialog.wide { width: min(900px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; overflow: hidden; }
+dialog.wide[open] { display: flex; flex-direction: column; }
+.dialog-form { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+.dialog-head { padding: 20px 24px 4px; }
+.dialog-head p { margin: 4px 0 0; }
+.dialog-head h2:focus, .dialog-scroll:focus { outline: none; box-shadow: none; }
+.dialog-scroll { overflow: auto; min-height: 0; padding: 14px 24px 8px; }
+.dialog-foot { display: flex; align-items: center; gap: 8px; padding: 14px 24px 18px; border-top: 1px solid var(--line); }
+.dialog-foot .spacer { flex: 1; }
+.body-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.08fr); gap: 22px; align-items: start; }
+.body-figure { margin: 0; padding: 12px; border-radius: var(--r-lg); background: var(--surface-2); border: 1px solid var(--line); position: sticky; top: 0; }
+.body-figure svg { display: block; width: 100%; height: auto; }
+.body-figure figcaption { font-size: var(--fs-small); color: var(--text-2); text-align: center; margin-top: 6px; min-height: 1.45em; }
+.fig-body { fill: var(--surface-3); stroke: var(--line-strong); stroke-width: 1.4; stroke-linejoin: round; }
+.fig-limb-out { fill: none; stroke: var(--line-strong); stroke-linecap: round; stroke-linejoin: round; }
+.fig-limb { fill: none; stroke: var(--surface-3); stroke-linecap: round; stroke-linejoin: round; }
+.fig-crease { fill: none; stroke: var(--text-3); stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.7; }
+.fig-joint { fill: var(--text-3); }
+.m line, .m path { stroke: var(--text-3); stroke-width: 1.4; fill: none; stroke-linecap: round; transition: stroke 0.15s, stroke-width 0.15s, opacity 0.15s; }
+.m .ext { stroke-dasharray: 2 3; stroke-width: 1; opacity: 0.8; }
+.m circle { fill: var(--surface); stroke: var(--text-3); stroke-width: 1.2; transition: fill 0.15s, stroke 0.15s; }
+.m text { fill: var(--text-2); font: 700 10px var(--font); text-anchor: middle; dominant-baseline: central; transition: fill 0.15s; }
+.body-figure svg.focus .m:not(.on) { opacity: 0.35; }
+.m.on line, .m.on path { stroke: var(--accent); stroke-width: 2.2; }
+.m.on .ext { stroke-width: 1.2; }
+.m.on circle { fill: var(--accent); stroke: var(--accent); }
+.m.on text { fill: var(--accent-ink); }
+.mfields { display: flex; flex-direction: column; gap: 2px; }
+.mfield { display: grid; grid-template-columns: 24px minmax(0, 1fr) 118px; gap: 3px 12px; align-items: center; padding: 9px 10px; border-radius: var(--r-md); border: 1px solid transparent; transition: background-color 0.15s, border-color 0.15s; }
+.mfield.on { background: var(--surface-2); border-color: var(--line); }
+.mnum { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: var(--fs-label); font-weight: 700; background: var(--surface-3); color: var(--text-2); transition: background-color 0.15s, color 0.15s; }
+.mfield.on .mnum { background: var(--accent); color: var(--accent-ink); }
+.mfield label { min-width: 0; cursor: pointer; }
+.mfield label b { display: block; font-weight: 600; }
+.mfield label small { display: block; color: var(--text-2); font-size: var(--fs-small); line-height: 1.35; }
+.minput { display: flex; align-items: center; gap: 6px; height: 38px; padding: 0 10px; border-radius: var(--r-md); border: 1px solid var(--line-strong); background: var(--surface-2); transition: border-color 0.15s, box-shadow 0.15s; }
+.minput:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+.minput input { flex: 1; min-width: 0; width: 100%; border: 0; padding: 0; background: transparent; color: var(--text); font: 600 15px/1 var(--font); font-variant-numeric: tabular-nums; text-align: right; outline: none; }
+.minput input::placeholder { color: var(--text-3); font-weight: 500; }
+.minput span { color: var(--text-2); font-size: var(--fs-small); }
+.mfield.invalid .minput { border-color: var(--bad); box-shadow: 0 0 0 3px var(--bad-weak); }
+.merr { grid-column: 2 / -1; margin: 0; color: var(--bad); font-size: var(--fs-small); }
+.mnote { font-size: var(--fs-small); color: var(--text-2); }
+
 /* ------------------------------------------------------------------ narrow: stage on top, inspector below */
 @media (max-width: 899px), (max-height: 540px) {
   body { overflow: auto; height: auto; }
@@ -780,6 +997,23 @@ dialog p strong { color: var(--text); font-weight: 600; }
   .rec-table td.frames::after { content: "\2009frames"; }
   .rec-table td.meta { order: 2; }
   .rec-table td.meta + td.meta:not(:nth-child(3))::before { content: "·"; margin-right: 6px; color: var(--text-3); }
+  body.lagging .brand b, body.lagging #link-extra { display: none; }
+  body.lagging.recording #link-name { display: none; }  /* the link pill shrinks to its status dot */
+  body.lagging.recording #link-pill { padding: 0 9px; gap: 0; }
+  #lag-pill .lag-word { display: none; }
+  .step-grid, .result-grid, .body-grid { grid-template-columns: minmax(0, 1fr); }
+  .flow-bar { padding: 0 8px 0 14px; gap: 10px; }
+  .flow-bar .brand-mark { display: none; }
+  .steps { gap: 6px; }
+  .steps li:not([aria-current="step"]) span { display: none; }
+  .steps li:not(:last-child)::after { width: 10px; }
+  .flow-body { padding: 18px 12px 32px; }
+  .card-stage { min-height: 280px; padding: 40px 16px 30px 40px; }
+  .board-thumb { min-height: 200px; padding: 14px; }
+  .body-figure { position: static; }
+  .mfield { grid-template-columns: 24px minmax(0, 1fr) 100px; gap: 3px 10px; padding: 9px 6px; }
+  .dialog-head, .dialog-scroll, .dialog-foot { padding-left: 16px; padding-right: 16px; }
+  .metrics { grid-template-columns: 1fr 1fr; }
 }
 </style>
 </head>
@@ -809,6 +1043,14 @@ dialog p strong { color: var(--text); font-weight: 600; }
     <symbol id="i-cloud-off" viewBox="0 0 24 24"><path d="M3 3l18 18M8.5 6.5A6 6 0 0 1 17.6 10 4 4 0 0 1 20 17M17 19H7a4.5 4.5 0 0 1-1.4-8.8"/></symbol>
     <symbol id="i-camera" viewBox="0 0 24 24"><rect x="2.5" y="6" width="13.5" height="12" rx="2.5"/><path d="m16 10.4 4.3-2.6a.8.8 0 0 1 1.2.7v7a.8.8 0 0 1-1.2.7L16 13.6"/></symbol>
     <symbol id="i-play" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><path d="m10 9.2 5 2.8-5 2.8z"/></symbol>
+    <symbol id="i-target" viewBox="0 0 24 24"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><circle cx="12" cy="12" r="3.2"/></symbol>
+    <symbol id="i-ruler" viewBox="0 0 24 24"><path d="M3.8 15.6 15.6 3.8a1.4 1.4 0 0 1 2 0l2.6 2.6a1.4 1.4 0 0 1 0 2L8.4 20.2a1.4 1.4 0 0 1-2 0l-2.6-2.6a1.4 1.4 0 0 1 0-2Z"/><path d="m7.5 12 1.8 1.8M10 9.5l1.2 1.2M12.5 7l1.8 1.8M15 4.5l1.2 1.2"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11M17.5 6.5l-11 11"/></symbol>
+    <symbol id="i-resize" viewBox="0 0 24 24"><path d="M9 4.5H4.5V9M15 19.5h4.5V15M4.5 4.5l15 15"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1.5"/><path d="M4 9.3h16M4 14.7h16M9.3 4v16M14.7 4v16"/><path d="M4 4h5.3v5.3H4zM14.7 4H20v5.3h-5.3zM9.3 9.3h5.4v5.4H9.3zM4 14.7h5.3V20H4zM14.7 14.7H20V20h-5.3z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13.5 6.5 19 12l-5.5 5.5"/></symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3.5c.6 4.2 2.3 5.9 6.5 6.5-4.2.6-5.9 2.3-6.5 6.5-.6-4.2-2.3-5.9-6.5-6.5 4.2-.6 5.9-2.3 6.5-6.5Z"/><path d="M18.5 15.5c.3 1.6 1 2.3 2.5 2.5-1.6.3-2.3 1-2.5 2.5-.3-1.6-1-2.3-2.5-2.5 1.6-.3 2.3-1 2.5-2.5Z"/></symbol>
   </defs>
 </svg>
 
@@ -821,6 +1063,7 @@ dialog p strong { color: var(--text); font-weight: 600; }
   <div class="pill" id="link-pill" role="status" aria-live="polite">
     <span class="dot" id="link-dot"></span><strong id="link-name">Connecting…</strong><span id="link-extra"></span>
   </div>
+  <div class="pill" id="lag-pill" role="status" hidden><svg class="i sm"><use href="#i-clock"/></svg><span><span class="lag-word">Preview </span><span class="num" id="lag-value"></span> behind</span></div>
   <div class="spacer"></div>
   <div class="pill" id="rec-pill" hidden><span class="dot rec"></span><span>REC</span><span class="num" id="rec-pill-time">00:00:00</span></div>
   <div class="shortcuts" aria-label="Keyboard shortcuts">
@@ -950,6 +1193,25 @@ dialog p strong { color: var(--text); font-weight: 600; }
       </section>
     </div>
 
+    <div class="cards">
+      <section class="panel" aria-labelledby="h-calib">
+        <div class="panel-head"><h2 id="h-calib">Camera calibration</h2><span class="aside" id="calib-aside"></span></div>
+        <div id="calib-card"><p class="setup-note">Loading…</p></div>
+        <div class="setup-foot">
+          <button class="btn primary" id="calib-open" type="button"><svg class="i"><use href="#i-target"/></svg>Calibrate</button>
+          <span class="faint" id="calib-screen"></span>
+        </div>
+      </section>
+      <section class="panel" aria-labelledby="h-body">
+        <div class="panel-head"><h2 id="h-body">Body measurements</h2><span class="aside" id="body-aside"></span></div>
+        <div class="measures" id="body-card"></div>
+        <div class="setup-foot">
+          <button class="btn" id="body-open" type="button"><svg class="i"><use href="#i-ruler"/></svg>Edit measurements</button>
+          <span class="faint" id="body-note">Copied into every new recording</span>
+        </div>
+      </section>
+    </div>
+
     <section class="panel" aria-labelledby="h-motion">
       <div class="panel-head"><h2 id="h-motion">Motion</h2><span class="aside" id="motion-aside"></span></div>
       <div class="motion-grid" id="motion-grid"></div>
@@ -983,12 +1245,189 @@ dialog p strong { color: var(--text); font-weight: 600; }
   <div class="dialog-actions"><button class="btn" id="pair-close" type="button">Close</button></div>
 </dialog>
 
+<section class="flow" id="calib" role="dialog" aria-modal="true" aria-labelledby="calib-title" hidden>
+  <header class="flow-bar">
+    <div class="brand-mark"><svg class="i"><use href="#i-target"/></svg></div>
+    <h2 id="calib-title">Camera calibration</h2>
+    <ol class="steps" id="calib-steps" aria-label="Steps">
+      <li data-step="scale"><span>Screen scale</span></li>
+      <li data-step="capture"><span>Capture</span></li>
+      <li data-step="result"><span>Result</span></li>
+    </ol>
+    <button class="btn ghost icon" id="calib-close" type="button" aria-label="Close calibration" title="Close (Esc)"><svg class="i"><use href="#i-close"/></svg></button>
+  </header>
+  <div class="flow-body" id="calib-body">
+    <section class="step" data-step="scale" aria-labelledby="scale-title">
+      <div class="step-grid">
+        <div class="step-side">
+          <div>
+            <h3 id="scale-title">Measure this screen</h3>
+            <p class="lead">Hold a <b>bank card</b> (or any ID-1 card) flat against the screen, its top-left corner in the corner mark. Drag the round handle, or press <b>−</b> and <b>+</b>, until the outline matches the card's edges.</p>
+          </div>
+          <div class="scale-ctl">
+            <button class="btn" id="scale-minus" type="button" aria-label="Smaller outline" title="Smaller (←, Shift for faster)">−</button>
+            <div class="scale-readout" aria-live="polite"><b class="num" id="scale-value">–</b><small class="num" id="scale-sub"></small></div>
+            <button class="btn" id="scale-plus" type="button" aria-label="Larger outline" title="Larger (→, Shift for faster)">+</button>
+          </div>
+          <p class="screen-size" id="scale-screen"></p>
+          <div class="callout-warn" id="scale-warn" hidden><svg class="i"><use href="#i-alert"/></svg><span id="scale-warn-text"></span></div>
+          <div class="step-actions"><button class="btn primary" id="scale-next" type="button">Continue<svg class="i"><use href="#i-arrow"/></svg></button></div>
+          <p class="setup-note">The scale gives the board its real size, which the pipeline uses to measure distances. The lens calibration itself does not depend on it.</p>
+        </div>
+        <div class="card-stage" id="card-stage">
+          <div class="card-outline" id="card-outline">
+            <span class="card-anchor"></span>
+            <span class="card-dim w"><span>85.60 mm</span></span>
+            <span class="card-dim h"><span>53.98 mm</span></span>
+            <span class="chip" id="card-chip"></span>
+            <span class="card-hint">Card here, either side up</span>
+            <button class="card-handle" id="card-handle" type="button" aria-label="Resize the card outline (arrow keys)"><svg class="i"><use href="#i-resize"/></svg></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="step" data-step="capture" aria-labelledby="capture-title" hidden>
+      <div class="step-grid">
+        <div class="step-side">
+          <div>
+            <h3 id="capture-title">Look at the board through the glasses</h3>
+            <p class="lead">The board fills the screen at its real size. A panel beside it says what to do next.</p>
+          </div>
+          <ol class="howto">
+            <li><span>Put the glasses on and start the <b>glasses preview</b> in GlassesData.</span></li>
+            <li><span>Sit <b>30 to 60 cm</b> from the screen and press <b>Show the board</b>.</span></li>
+            <li><span>Move your head so the board appears in <b>every part of your view</b>, near and far, straight on and at an angle. Hold still for a moment at each spot.</span></li>
+            <li><span>At <b>25 views</b> press <b>Solve</b>. <kbd>Esc</kbd> brings you back here.</span></li>
+          </ol>
+          <div class="status-line" id="capture-video"><span class="dot"></span><span></span></div>
+          <div class="progress-card" id="capture-progress" hidden>
+            <div class="progress-top"><span class="big num" id="capture-count">0</span><span class="unit" id="capture-target">/ 25 views</span><span class="aside num" id="capture-coverage"></span></div>
+            <div class="bar" id="capture-bar"><i></i></div>
+          </div>
+          <div class="step-actions">
+            <button class="btn primary" id="board-show" type="button"><svg class="i"><use href="#i-grid"/></svg>Show the board</button>
+            <button class="btn" id="capture-solve" type="button" hidden>Solve</button>
+            <button class="btn ghost" id="capture-reset" type="button" hidden>Start over</button>
+          </div>
+          <p class="setup-note" id="capture-note"></p>
+        </div>
+        <div class="board-thumb" id="board-thumb"><div class="board-ghost"><i></i><p class="faint">The board is drawn for this screen when you press <b>Show the board</b>.</p></div></div>
+      </div>
+    </section>
+
+    <section class="step" data-step="result" aria-label="Result" hidden>
+      <div id="result-body"></div>
+    </section>
+  </div>
+</section>
+
+<div class="board-view" id="board-view" hidden>
+  <img id="board-img" alt="ChArUco calibration board">
+  <aside class="hud" id="hud" aria-label="Calibration progress">
+    <div class="hud-count"><b class="num" id="hud-count">0</b><span id="hud-target">/ 25 views</span></div>
+    <div class="bar" id="hud-bar"><i></i></div>
+    <div class="hud-guide" id="hud-guide" role="status"><svg class="i"><use href="#i-sparkle"/></svg><span>Look at the board</span></div>
+    <div class="hud-maps">
+      <figure><canvas id="hud-coverage" role="img" aria-label="Parts of the camera image covered so far"></canvas><figcaption>Coverage</figcaption></figure>
+      <figure><img id="hud-preview" alt="What the glasses see, with the corners found"><figcaption>Glasses view</figcaption></figure>
+    </div>
+    <div class="hud-stats">
+      <div><small>Corners</small><b class="num" id="hud-corners">–</b></div>
+      <div><small>Distance</small><b class="num" id="hud-distance">–</b></div>
+      <div><small>Tilt</small><b class="num" id="hud-tilt">–</b></div>
+    </div>
+    <div class="hud-actions">
+      <button class="btn" id="hud-exit" type="button">Exit <kbd>Esc</kbd></button>
+      <button class="btn primary" id="hud-solve" type="button" disabled>Solve</button>
+    </div>
+  </aside>
+</div>
+
+<dialog id="body" class="wide" aria-labelledby="body-title">
+  <form id="body-form" class="dialog-form" novalidate>
+    <div class="dialog-head">
+      <h2 id="body-title" tabindex="-1">Body measurements</h2>
+      <p>In centimetres, with a tape. Leave a field empty to use the adult average shown in grey. Every new recording gets a copy.</p>
+    </div>
+    <div class="dialog-scroll">
+      <div class="body-grid">
+        <figure class="body-figure">
+          <svg id="body-svg" viewBox="0 0 400 290" role="img" aria-labelledby="body-svg-title">
+            <title id="body-svg-title">Where each measurement goes: on the arm and shoulders, and on the hand</title>
+            <!-- arms (outlined thick strokes), then torso, neck and head -->
+            <path class="fig-limb-out" stroke-width="17" d="M60 86 L46 146 L40 204"/>
+            <path class="fig-limb" stroke-width="14.5" d="M60 86 L46 146 L40 204"/>
+            <path class="fig-limb-out" stroke-width="17" d="M140 86 L156 146 L164 204"/>
+            <path class="fig-limb" stroke-width="14.5" d="M140 86 L156 146 L164 204"/>
+            <ellipse class="fig-body" cx="39" cy="219" rx="8.5" ry="12"/>
+            <ellipse class="fig-body" cx="165" cy="219" rx="8.5" ry="12"/>
+            <path class="fig-body" d="M58 86 C58 77 64 72 75 71 L125 71 C136 72 142 77 142 86 L134 196 C133 202 128 206 122 206 L78 206 C72 206 67 202 66 196 Z"/>
+            <path class="fig-body" d="M93 56 L107 56 L108 72 L92 72 Z"/>
+            <circle class="fig-body" cx="100" cy="38" r="19"/>
+            <circle class="fig-joint" cx="156" cy="146" r="2.6"/>
+            <path class="fig-crease" d="M157 205 L171 203"/>
+            <!-- hand, palm towards you: wrist, thumb and fingers under the palm -->
+            <path class="fig-body" d="M278 238 L278 292 L326 292 L326 238"/>
+            <path class="fig-limb-out" stroke-width="19" d="M268 226 L241 170"/>
+            <path class="fig-limb" stroke-width="16.5" d="M268 226 L241 170"/>
+            <rect class="fig-body" x="263" y="70" width="17" height="92" rx="8.5"/>
+            <rect class="fig-body" x="283" y="54" width="17" height="108" rx="8.5"/>
+            <rect class="fig-body" x="303" y="64" width="17" height="98" rx="8.5"/>
+            <rect class="fig-body" x="323" y="92" width="15" height="70" rx="7.5"/>
+            <path class="fig-body" d="M262 156 Q262 148 270 148 L332 148 Q340 148 340 156 L338 232 Q336 250 318 250 L284 250 Q266 250 264 232 Z"/>
+            <path class="fig-crease" d="M279 251 L325 251"/>
+            <!-- measurements -->
+            <g class="m" data-m="shoulder_width_m">
+              <path class="ext" d="M60 80 V58 M140 80 V58"/>
+              <path d="M60 62 H140 M60 58 V66 M140 58 V66"/>
+              <circle cx="78" cy="62" r="8"/><text x="78" y="62">6</text>
+            </g>
+            <g class="m" data-m="upper_arm_length_m">
+              <path d="M154 79 L170 140 M150 80 L158 78 M166 141 L174 139"/>
+              <circle cx="172" cy="106" r="8"/><text x="172" y="106">5</text>
+            </g>
+            <g class="m" data-m="forearm_length_m">
+              <path d="M171 145 L179 203 M167 146 L175 145 M175 204 L183 203"/>
+              <circle cx="186" cy="172" r="8"/><text x="186" y="172">4</text>
+            </g>
+            <g class="m" data-m="hand_length_m">
+              <path class="ext" d="M300 54 H367 M326 251 H367"/>
+              <path d="M362 54 V251 M358 54 H366 M358 251 H366"/>
+              <circle cx="362" cy="118" r="8"/><text x="362" y="118">1</text>
+            </g>
+            <g class="m" data-m="palm_length_m">
+              <path d="M291.5 148 V251 M286.5 148 H296.5 M286.5 251 H296.5"/>
+              <circle cx="291.5" cy="204" r="8"/><text x="291.5" y="204">2</text>
+            </g>
+            <g class="m" data-m="palm_width_m">
+              <path d="M263 136 H338 M263 132 V140 M338 132 V140"/>
+              <circle cx="249" cy="136" r="8"/><text x="249" y="136">3</text>
+            </g>
+          </svg>
+          <figcaption id="body-caption">Hover or focus a field to see where it goes</figcaption>
+        </figure>
+        <div class="mfields" id="body-fields"></div>
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <button class="btn ghost" id="body-clear" type="button">Clear all</button>
+      <span class="mnote" id="body-status"></span>
+      <span class="spacer"></span>
+      <button class="btn" id="body-cancel" type="button">Cancel</button>
+      <button class="btn primary" id="body-save" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
 <script>
 "use strict";
 (function () {
   const $ = (id) => document.getElementById(id);
   const POLL_MS = 250;
   const LIST_MS = 5000;
+  const LAG_SHOW_S = 0.5;   // the preview is called late beyond this
+  const LAG_BAD_S = 3;
   const CHART_SECONDS = 20;
   const HISTORY_KEEP_S = 32;
   const HAND_BONES = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12],
@@ -1284,7 +1723,14 @@ dialog p strong { color: var(--text); font-weight: 600; }
       let note = "No dropped frames";
       if (drops > 0) { state = worse(state, "warn"); note = "Phone dropped " + plural(drops, "frame") + " in 10 s"; }
       else if (state !== "ok") note = "Sending " + fixed(sent, 0) + " of " + fixed(glasses, 0) + " fps";
-      else if (isNum(v.phone_dropped_frames) && v.phone_dropped_frames > 0) note = "No drops now · " + grouped(v.phone_dropped_frames) + " earlier";
+      else if (isNum(v.phone_dropped_frames) && v.phone_dropped_frames > 0) {
+        note = "No drops now · " + grouped(v.phone_dropped_frames) + " earlier" + (isNum(v.phone_gaps) && v.phone_gaps > 0 ? " in " + plural(v.phone_gaps, "gap") : "");
+      }
+      const queue = v.phone_queue_frames, rate = isNum(expected) && expected > 0 ? expected : 30;
+      if (isNum(queue) && queue >= Math.max(3, rate / 2)) {  // half a second or more waiting on the phone
+        state = worse(state, queue >= 2 * rate ? "bad" : "warn");
+        note = plural(queue, "frame") + " queued" + (v.phone_record_priority ? " · buffering for the recording" : " on the phone");
+      }
       result.phone = { state, value: v.phone_sent_fps, note };
     }
 
@@ -1354,6 +1800,10 @@ dialog p strong { color: var(--text); font-weight: 600; }
       setText(n.note, info.note || "");
       n.node.title = hop.tip + (info.note ? "\n" + info.note : "");
       if (info.state === "warn" || info.state === "bad") problems.push({ hop, info });
+    }
+    const lag = st.video.preview_lag_s;
+    if (st.link.connected && st.video.has_frame && isNum(lag) && lag > LAG_SHOW_S) {
+      problems.push({ hop: { name: "Preview" }, info: { state: lag > LAG_BAD_S ? "bad" : "warn", note: fixed(lag, 1) + " s behind real time" } });
     }
     // the summary names the unstable hop(s) in words
     const box = $("chain-summary");
@@ -1655,7 +2105,7 @@ dialog p strong { color: var(--text); font-weight: 600; }
     }
     // The stream runs while there is a decoded frame and the tab is visible (or was, within
     // HIDDEN_GRACE_MS); the message covers the frame until the first picture is on screen.
-    const wanted = link.connected && v.has_frame && pageVisible;
+    const wanted = link.connected && v.has_frame && pageVisible && !calib.open;
     setVideo(wanted);
     const showing = wanted && video.ready;
     $("empty").hidden = showing;
@@ -1749,6 +2199,9 @@ dialog p strong { color: var(--text); font-weight: 600; }
     renderVcam(st);
     renderGlasses(st);
     renderMotion(st);
+    renderLag(st);
+    renderCalibCard();
+    if (calib.open && calib.step === "capture") renderCapture();
     drawCharts();
 
     if (wasRecording !== null && wasRecording !== rec.active) loadRecordings();
@@ -1826,9 +2279,19 @@ dialog p strong { color: var(--text); font-weight: 600; }
     aside.replaceChildren(link.connected ? el("span", "tag accent", kind) : el("span", "tag", "Not connected"));
     setText($("delay-value"), isNum(v.delay_ms) ? fixed(v.delay_ms, v.delay_ms < 10 ? 1 : 0) : "–");
     const sources = Object.keys(link.sources).map((k) => [(LINK_HELP[k] ? LINK_HELP[k].name : k.toUpperCase()), sentence(link.sources[k]), "", link.sources[k]]);
+    const lagging = isNum(v.preview_lag_s) && v.preview_lag_s > LAG_SHOW_S;
     kvRows("link-kv", [
       link.connected ? ["Device", link.device || "–"] : ["State", link.text, "", link.text],
       ["Round trip", isNum(v.rtt_ms) ? fixed(v.rtt_ms, 1) + " ms" : "–"],
+      link.connected && v.has_frame ? ["Preview behind", isNum(v.preview_lag_s) ? fixed(v.preview_lag_s, 2) + " s" : "–", lagging ? "warn" : "",
+        "How late the live picture is: this computer's clock now, minus the frame's capture time on the phone's clock mapped through the PING/PONG offset"] : null,
+      link.connected && isNum(v.phone_queue_frames) ? ["Phone queue", plural(v.phone_queue_frames, "frame"), v.phone_queue_frames >= 15 ? "warn" : "",
+        "Video frames the iPhone has not sent yet"] : null,
+      link.connected && isNum(v.phone_gaps) ? ["Drop episodes", v.phone_gaps === 0 ? "None" : String(v.phone_gaps), v.phone_gaps > 0 ? "warn" : "",
+        "Times the iPhone had to drop video since it connected"] : null,
+      link.connected && typeof v.phone_record_priority === "boolean" ? ["When the link is slow", v.phone_record_priority ? "Phone buffers" : "Phone drops frames", "",
+        v.phone_record_priority ? "This computer is recording: the iPhone buffers video instead of dropping it, so the preview may fall behind"
+          : "Not recording: the iPhone drops video rather than fall behind"] : null,
       ...sources,
     ]);
   }
@@ -2314,7 +2777,7 @@ dialog p strong { color: var(--text); font-weight: 600; }
 
   document.addEventListener("keydown", (event) => {
     if (event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
-    if ($("pair").open) return;
+    if ($("pair").open || $("body").open || calib.open) return;
     const target = event.target;
     if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
     const key = event.key.toLowerCase();
@@ -2343,11 +2806,704 @@ dialog p strong { color: var(--text); font-weight: 600; }
     poll();
   });
 
+  // ---------------------------------------------------------------- preview lag
+
+  function renderLag(st) {
+    const lag = st.video.preview_lag_s;
+    const show = st.link.connected && st.video.has_frame && isNum(lag) && lag > LAG_SHOW_S && !calib.open;
+    const pill = $("lag-pill");
+    pill.hidden = !show;
+    document.body.classList.toggle("lagging", show);
+    if (!show) return;
+    setText($("lag-value"), fixed(lag, 1) + " s");
+    setClass(pill, "pill" + (lag > LAG_BAD_S ? " bad" : ""));
+    const queue = st.video.phone_queue_frames;
+    pill.title = "The live picture shows the glasses " + fixed(lag, 1) + " s late"
+      + (isNum(queue) && queue > 0 ? ": " + plural(queue, "frame") + " wait on the iPhone" + (st.video.phone_record_priority ? " (it buffers while this computer records)" : "") : "");
+  }
+
+  // ---------------------------------------------------------------- setup: screen scale, calibration and body cards
+
+  const CARD_MM = [85.6, 53.98];
+  const SCALE_KEY = "glassesdata.screenScale";
+  const CSS_PX_PER_MM = 96 / 25.4;  // what CSS calls a millimetre; real screens differ
+  let calibState = null;            // GET /api/calibration
+  let profileState = null;          // GET /api/profile
+  const calib = { open: false, step: "scale", widthCss: 0, timer: null, polling: false, boardShown: false, fullscreen: false,
+    solving: false, saved: false, lastAccepted: -1, previewSeq: -1, previewLoading: false, resizeTimer: null, laidOut: null };
+
+  function ratioNow() { return Math.round((window.devicePixelRatio || 1) * 10000) / 10000; }
+  function round4(v) { return Math.round(v * 10000) / 10000; }
+  function times(r) { return (Math.round(r * 100) / 100) + "×"; }
+  function storedScale() {
+    // device pixels per mm stay the same when the page zoom changes, CSS pixels do not
+    let local = null;
+    try { local = JSON.parse(localStorage.getItem(SCALE_KEY) || "null"); } catch (error) { local = null; }
+    if (local && isNum(local.device_px_per_mm) && isNum(local.device_pixel_ratio)) return local;
+    const server = calibState && calibState.screen;
+    if (server && isNum(server.css_px_per_mm) && isNum(server.device_pixel_ratio)) {
+      const r = server.device_pixel_ratio;
+      return { device_px_per_mm: server.css_px_per_mm * r, device_pixel_ratio: r, measured: server.measured,
+        screen_device: Array.isArray(server.screen_css) ? [Math.round(server.screen_css[0] * r), Math.round(server.screen_css[1] * r)] : null };
+    }
+    return null;
+  }
+  function cssPxPerMm(scale) { return scale ? scale.device_px_per_mm / ratioNow() : CSS_PX_PER_MM; }
+  function scaleChange(scale) {  // why the measured scale may not fit this display any more ("" when it does)
+    if (!scale) return "";
+    const r = ratioNow();
+    if (Math.abs(scale.device_pixel_ratio - r) > 0.01) {
+      return "The page zoom or the display changed since this screen was measured (" + times(scale.device_pixel_ratio) + " then, " + times(r) + " now). Measure it again.";
+    }
+    if (Array.isArray(scale.screen_device)) {
+      const w = Math.round(screen.width * r), h = Math.round(screen.height * r);
+      if (Math.abs(w - scale.screen_device[0]) > 2 || Math.abs(h - scale.screen_device[1]) > 2) return "This seems to be another screen than the one measured. Measure it again.";
+    }
+    return "";
+  }
+  window.matchMedia("(resolution: " + ratioNow() + "dppx)").addEventListener("change", () => { renderCalibCard(); if (calib.open && calib.step === "scale") renderScale(); });
+
+  function ago(iso) {
+    const t = Date.parse(iso || "");
+    if (!isFinite(t)) return "–";
+    const s = (Date.now() - t) / 1000;
+    if (s < 90) return "just now";
+    if (s < 3600) return Math.round(s / 60) + " min ago";
+    if (s < 86400) return Math.round(s / 3600) + " h ago";
+    return startedText(iso);
+  }
+  function cm(metres) { return (Math.round(metres * 1000) / 10).toFixed(1); }
+
+  async function loadSetup() {
+    try { calibState = await getJson("/api/calibration"); } catch (error) { /* the banner reports a lost receiver */ }
+    try { profileState = await getJson("/api/profile"); } catch (error) { /* idem */ }
+    renderCalibCard();
+    renderBodyCard();
+  }
+
+  function renderCalibCard() {
+    const box = $("calib-card");
+    if (!calibState) return;
+    const c = calibState.current;
+    const fmt = last && last.video.format;
+    const otherSize = !!(c && fmt && (fmt.width !== c.width || fmt.height !== c.height));
+    const aside = $("calib-aside");
+    const tagText = !c ? "Not calibrated" : otherSize ? "Other video size" : "Calibrated";
+    if (aside.textContent !== tagText) aside.replaceChildren(el("span", "tag" + (!c ? "" : otherSize ? " warn" : " good"), tagText));
+    const scale = storedScale(), change = scaleChange(scale);
+    const screenLine = $("calib-screen");
+    setText(screenLine, !scale ? "Screen not measured yet" : change ? "Display changed: measure the screen again" : "Screen " + cssPxPerMm(scale).toFixed(2) + " px per mm");
+    setClass(screenLine, change ? "warn" : "faint");
+    screenLine.title = change || (scale && scale.measured ? "Measured " + ago(scale.measured) + " with a bank card" : "");
+    const key = JSON.stringify([c && c.created, otherSize, fmt && fmt.width, c && ago(c.created)]);
+    if (box.dataset.key === key) return;
+    box.dataset.key = key;
+    if (!c) {
+      box.replaceChildren(el("p", "setup-note", "Not calibrated yet: the pipeline assumes a 65° horizontal field of view and no lens distortion. "
+        + "Calibrating takes a few minutes, with the glasses on and a bank card."));
+      return;
+    }
+    const hero = el("div", "setup-hero");
+    const fov = c.fov_deg;
+    hero.append(el("span", "big num", fov ? fixed(fov.horizontal, 1) + "° × " + fixed(fov.vertical, 1) + "°" : "–"), el("span", "unit", "field of view"));
+    const dl = el("dl", "kv");
+    dl.id = "calib-kv";
+    box.replaceChildren(hero, dl);
+    kvRows("calib-kv", [
+      ["Model", words(c.model) + " · " + fixed(c.rms_px, 2) + " px error", "", "Reprojection error (RMS) on the views used"],
+      ["Focal length", fixed(c.fx, 1) + " · " + fixed(c.fy, 1) + " px"],
+      ["Centre", fixed(c.cx, 1) + ", " + fixed(c.cy, 1) + " px"],
+      ["Video size", c.width + "×" + c.height + (otherSize ? " (stream " + fmt.width + "×" + fmt.height + ")" : ""), otherSize ? "warn" : "",
+        otherSize ? "The pipeline rescales K for the same aspect ratio and refuses a different one" : ""],
+      ["Made", ago(c.created), "", c.created],
+    ]);
+  }
+
+  function renderBodyCard() {
+    if (!profileState) return;
+    const p = profileState.profile, fields = profileState.fields;
+    const count = fields.filter((f) => p.measured[f.key]).length;
+    const aside = $("body-aside");
+    const tagText = count ? count + " of " + fields.length + " measured" : "Adult averages";
+    if (aside.textContent !== tagText) aside.replaceChildren(el("span", "tag" + (count === fields.length ? " good" : count ? " accent" : ""), tagText));
+    const box = $("body-card");
+    box.replaceChildren(...fields.map((f) => {
+      const item = el("div", "measure" + (p.measured[f.key] ? "" : " default"));
+      item.title = f.definition + (p.measured[f.key] ? "" : " (adult average: not measured)");
+      item.append(el("span", null, f.label), el("b", "num", cm(p[f.key]) + " cm"));
+      return item;
+    }));
+    setText($("body-note"), profileState.note || "Copied into every new recording");
+  }
+
+  // ---------------------------------------------------------------- calibration flow
+
+  function setInert(on) {
+    for (const node of [document.querySelector(".topbar"), document.querySelector(".shell"), $("banner")]) node.inert = on;
+  }
+  async function openCalib() {
+    if (calib.open) return;
+    calib.open = true;
+    calib.saved = false;
+    $("calib").hidden = false;
+    setInert(true);
+    if (last) render(last);  // pauses the live stream and hides the top-bar pill under the overlay
+    await refreshCalib();
+    const scale = storedScale();
+    calib.widthCss = CARD_MM[0] * cssPxPerMm(scale);
+    const session = calibState && calibState.session;
+    showStep(session && session.solution ? "result" : session && session.samples && !scaleChange(scale) ? "capture" : "scale");
+    pollCalib();
+  }
+  function closeCalib() {
+    if (!calib.open) return;
+    if (calib.boardShown) exitBoard(false);
+    calib.open = false;
+    clearTimeout(calib.timer);
+    $("calib").hidden = true;
+    setInert(false);
+    const session = calibState && calibState.session;
+    if (session && session.capturing) post("/api/calibration/capture", { active: false }).catch(() => {});
+    loadSetup();
+    $("calib-open").focus();
+    if (last) render(last);
+  }
+  function showStep(step) {
+    calib.step = step;
+    const order = ["scale", "capture", "result"];
+    for (const section of document.querySelectorAll("#calib .step")) section.hidden = section.dataset.step !== step;
+    for (const li of $("calib-steps").children) {
+      if (li.dataset.step === step) li.setAttribute("aria-current", "step"); else li.removeAttribute("aria-current");
+      li.classList.toggle("done", order.indexOf(li.dataset.step) < order.indexOf(step));
+    }
+    if (step === "scale") renderScale();
+    else if (step === "capture") renderCapture();
+    else renderResult();
+    $("calib-body").scrollTop = 0;
+  }
+  async function refreshCalib() {
+    try { calibState = await getJson("/api/calibration"); } catch (error) { return; }
+    renderCalibCard();
+    if (!calib.open) return;
+    if (calib.boardShown) renderHud();
+    else if (calib.step === "capture") renderCapture();
+  }
+  async function pollCalib() {
+    clearTimeout(calib.timer);
+    if (!calib.open) return;
+    if (!calib.polling) {
+      calib.polling = true;
+      await refreshCalib();
+      calib.polling = false;
+    }
+    if (calib.open) calib.timer = setTimeout(pollCalib, calib.boardShown ? 250 : 800);
+  }
+
+  // step 1: the card on the screen
+  function renderScale() {
+    const width = calib.widthCss, pxmm = width / CARD_MM[0];
+    const outline = $("card-outline");
+    outline.style.width = width.toFixed(2) + "px";
+    outline.style.height = (width * CARD_MM[1] / CARD_MM[0]).toFixed(2) + "px";
+    outline.style.borderRadius = (3.18 * pxmm).toFixed(2) + "px";  // ID-1 corner radius
+    const chip = $("card-chip");  // where a bank card's contact chip sits: it tells the card's orientation
+    chip.style.left = (10.3 * pxmm) + "px"; chip.style.top = (17.5 * pxmm) + "px";
+    chip.style.width = (11.5 * pxmm) + "px"; chip.style.height = (9 * pxmm) + "px";
+    setText($("scale-value"), pxmm.toFixed(3) + " px/mm");
+    setText($("scale-sub"), "Card " + width.toFixed(1) + " px wide · " + Math.round(pxmm * 25.4) + " px per inch");
+    const wmm = screen.width / pxmm, hmm = screen.height / pxmm;
+    setText($("scale-screen"), "That makes this screen about " + (wmm / 10).toFixed(1) + " × " + (hmm / 10).toFixed(1) + " cm ("
+      + (Math.hypot(wmm, hmm) / 25.4).toFixed(1) + " inch diagonal). If that is far off, the outline is not matched yet.");
+    const change = scaleChange(storedScale());
+    $("scale-warn").hidden = !change;
+    setText($("scale-warn-text"), change);
+  }
+  function nudge(delta) {
+    calib.widthCss = Math.min(Math.max(calib.widthCss + delta, 120), 2400);
+    renderScale();
+  }
+  async function saveScale() {
+    const r = ratioNow(), pxmm = calib.widthCss / CARD_MM[0];
+    const scale = { device_px_per_mm: pxmm * r, device_pixel_ratio: r, screen_device: [Math.round(screen.width * r), Math.round(screen.height * r)],
+      measured: new Date().toISOString() };
+    try { localStorage.setItem(SCALE_KEY, JSON.stringify(scale)); } catch (error) { /* the receiver keeps a copy */ }
+    const result = await post("/api/calibration/screen", { css_px_per_mm: round4(pxmm), device_pixel_ratio: r, screen_css: [screen.width, screen.height] })
+      .catch(() => ({ ok: false, message: "Could not reach the receiver." }));
+    if (!result.ok) toast(result.message, "bad");
+    await refreshCalib();
+    showStep("capture");
+  }
+  (function dragCard() {
+    const handle = $("card-handle");
+    let start = null;
+    handle.addEventListener("pointerdown", (event) => {
+      start = { x: event.clientX, y: event.clientY, width: calib.widthCss };
+      handle.setPointerCapture(event.pointerId);
+      event.preventDefault();
+    });
+    handle.addEventListener("pointermove", (event) => {
+      if (!start) return;
+      const dx = event.clientX - start.x, dy = (event.clientY - start.y) * CARD_MM[0] / CARD_MM[1];
+      calib.widthCss = Math.min(Math.max(start.width + (dx + dy) / 2, 120), 2400);
+      renderScale();
+    });
+    for (const type of ["pointerup", "pointercancel"]) handle.addEventListener(type, () => { start = null; });
+  })();
+  for (const [id, delta] of [["scale-minus", -0.5], ["scale-plus", 0.5]]) {
+    const button = $(id);
+    let repeat = null;
+    const stop = () => { clearTimeout(repeat); repeat = null; };
+    button.addEventListener("pointerdown", (event) => {  // hold to keep going
+      nudge(delta * (event.shiftKey ? 10 : 1));
+      const again = (wait) => { repeat = setTimeout(() => { nudge(delta * (event.shiftKey ? 10 : 1)); again(60); }, wait); };
+      again(400);
+    });
+    for (const type of ["pointerup", "pointerleave", "pointercancel"]) button.addEventListener(type, stop);
+    button.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); nudge(delta); } });
+  }
+  $("scale-next").addEventListener("click", saveScale);
+
+  // step 2: capture
+  function renderCapture() {
+    const session = calibState && calibState.session, st = last;
+    const live = !!(st && st.link.connected && st.video.has_frame);
+    const line = $("capture-video");
+    setClass(line.firstChild, "dot " + (live ? "good" : "warn"));
+    setText(line.lastChild, live ? "Video " + st.video.format.width + "×" + st.video.format.height + " from " + (st.link.device || "the iPhone")
+      : st && st.link.connected ? "Connected, but no video yet: start the glasses preview in GlassesData" : "No iPhone connected: connect it to see the glasses");
+    $("capture-progress").hidden = !session;
+    if (session) {
+      setText($("capture-count"), String(session.samples));
+      setText($("capture-target"), "/ " + session.target + " views");
+      setText($("capture-coverage"), session.coverage ? Math.round(session.coverage.fraction * 100) + "% of the image covered" : "");
+      $("capture-bar").firstChild.style.width = Math.min(100, (session.samples / session.target) * 100) + "%";
+      $("capture-bar").classList.toggle("good", session.samples >= session.target);
+    }
+    const solve = $("capture-solve");
+    solve.hidden = !session || session.samples < session.min_solve;
+    solve.classList.toggle("primary", !!session && session.samples >= session.target);
+    $("capture-reset").hidden = !session || !session.samples;
+    $("board-show").lastChild.textContent = session && session.samples ? "Continue capturing" : "Show the board";
+    $("board-show").classList.toggle("primary", !(session && session.samples >= session.target));
+    const thumb = $("board-thumb");
+    const board = session && session.board;
+    const key = board ? [board.squares_x, board.squares_y, board.width_px, session.created].join("-") : "";
+    if (thumb.dataset.key !== key) {
+      thumb.dataset.key = key;
+      if (board) {
+        const img = el("img");
+        img.alt = "The calibration board";
+        img.src = "/api/calibration/board.png?b=" + key;
+        thumb.replaceChildren(img);
+      } else {
+        const ghost = el("div", "board-ghost");
+        const p = el("p", "faint");
+        p.innerHTML = "The board is drawn for this screen when you press <b>Show the board</b>.";
+        ghost.append(el("i"), p);
+        thumb.replaceChildren(ghost);
+      }
+    }
+    setText($("capture-note"), board ? board.squares_x + " × " + board.squares_y + " squares of " + fixed(board.square_m * 1000, 1)
+      + " mm, " + board.dictionary.replace(/^DICT_(\d+)X(\d+)_\d+$/, "$1×$2 ArUco markers") + " · drawn at " + board.width_px + " × " + board.height_px + " screen pixels" : "");
+  }
+  function nextFrame() { return new Promise((resolve) => requestAnimationFrame(() => resolve())); }
+  async function showBoard() {
+    const view = $("board-view");
+    view.hidden = false;
+    calib.boardShown = true;
+    calib.laidOut = null;
+    $("calib").inert = true;
+    calib.fullscreen = false;
+    try {
+      if (view.requestFullscreen && !document.fullscreenElement) await view.requestFullscreen({ navigationUI: "hide" });
+      calib.fullscreen = document.fullscreenElement === view;
+    } catch (error) { calib.fullscreen = false; /* no full screen here: the board covers the window instead */ }
+    await nextFrame();
+    await nextFrame();
+    if (!calib.boardShown) return;
+    await layoutBoard();
+    $("hud-exit").focus();
+    pollCalib();
+  }
+  async function layoutBoard() {
+    const view = $("board-view"), hud = $("hud");
+    const W = view.clientWidth, H = view.clientHeight, r = ratioNow(), margin = Math.max(16, Math.min(32, Math.round(Math.min(W, H) * 0.025)));
+    const beside = W >= H * 1.15;  // landscape: the panel at the right; portrait: below
+    setClass(hud, "hud" + (beside ? "" : " bottom"));
+    hud.style.cssText = beside ? "right:" + margin + "px;top:50%;transform:translateY(-50%)" : "left:" + margin + "px;right:" + margin + "px;bottom:" + margin + "px";
+    const area = beside ? { x: margin, y: margin, w: W - hud.offsetWidth - 3 * margin, h: H - 2 * margin }
+      : { x: margin, y: margin, w: W - 2 * margin, h: H - hud.offsetHeight - 3 * margin };
+    const pxmm = round4(cssPxPerMm(storedScale()));
+    const session = calibState && calibState.session, board = session && session.board;
+    // Keep a board with views that still fits: a new board would start the capture over.
+    const keep = board && session.samples > 0 && Math.abs(board.device_pixel_ratio - r) < 1e-3 && Math.abs(board.css_px_per_mm - pxmm) < 1e-3
+      && board.css_width <= area.w + 0.5 && board.css_height <= area.h + 0.5;
+    let shown = board;
+    if (keep) {
+      await post("/api/calibration/capture", { active: true }).catch(() => {});
+    } else {
+      const result = await post("/api/calibration/start", { css_px_per_mm: pxmm, device_pixel_ratio: r, area_css: [Math.floor(area.w), Math.floor(area.h)] })
+        .catch(() => ({ ok: false, message: "Could not reach the receiver." }));
+      if (!result.ok) { toast(result.message, "bad"); exitBoard(); return; }
+      if (!result.kept && session && session.samples) toast("The board changed size, so the capture starts over", "");
+      shown = result.board;
+    }
+    const img = $("board-img");
+    img.style.width = shown.css_width + "px";
+    img.style.height = shown.css_height + "px";
+    // whole device pixels: one image pixel on one screen pixel
+    img.style.left = Math.round((area.x + (area.w - shown.css_width) / 2) * r) / r + "px";
+    img.style.top = Math.round((area.y + (area.h - shown.css_height) / 2) * r) / r + "px";
+    const src = "/api/calibration/board.png?b=" + [shown.squares_x, shown.squares_y, shown.width_px].join("-");
+    if (img.getAttribute("src") !== src) img.src = src;
+    calib.laidOut = { W, H };
+    calib.lastAccepted = -1;
+    await refreshCalib();
+  }
+  function exitBoard(back = true) {
+    if (!calib.boardShown) return;
+    calib.boardShown = false;
+    $("board-view").hidden = true;
+    $("calib").inert = false;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    post("/api/calibration/capture", { active: false }).then(() => refreshCalib()).catch(() => {});
+    if (back && calib.open) { showStep("capture"); $("board-show").focus(); }
+  }
+  document.addEventListener("fullscreenchange", () => {
+    if (!document.fullscreenElement && calib.boardShown && calib.fullscreen) exitBoard();  // Esc in full screen
+  });
+  window.addEventListener("resize", () => {
+    clearTimeout(calib.resizeTimer);
+    calib.resizeTimer = setTimeout(() => {
+      const view = $("board-view");
+      if (calib.boardShown && calib.laidOut && (calib.laidOut.W !== view.clientWidth || calib.laidOut.H !== view.clientHeight)) layoutBoard();
+    }, 300);
+  });
+
+  function renderHud() {
+    const s = calibState && calibState.session;
+    if (!s) return;
+    setText($("hud-count"), String(s.samples));
+    setText($("hud-target"), "/ " + s.target + " views");
+    $("hud-bar").firstChild.style.width = Math.min(100, (s.samples / s.target) * 100) + "%";
+    $("hud-bar").classList.toggle("good", s.samples >= s.target);
+    const guide = $("hud-guide");
+    setText(guide.lastChild, s.guidance);
+    if (calib.lastAccepted >= 0 && s.accepted_total > calib.lastAccepted) {
+      guide.classList.remove("got");
+      void guide.offsetWidth;  // restart the animation
+      guide.classList.add("got");
+    }
+    calib.lastAccepted = s.accepted_total;
+    const look = s.last;
+    const corners = $("hud-corners");
+    setText(corners, look ? String(look.corners) : "–");
+    setClass(corners, "num" + (!look ? "" : look.corners >= s.min_corners ? " good" : look.corners ? " warn" : " bad"));
+    setText($("hud-distance"), look && isNum(look.distance_m) ? fixed(look.distance_m * 100, 0) + " cm" : "–");
+    setText($("hud-tilt"), look && isNum(look.tilt_deg) ? fixed(look.tilt_deg, 0) + "°" : "–");
+    $("hud-solve").disabled = s.samples < s.min_solve || calib.solving;
+    $("hud-solve").title = s.samples < s.min_solve ? "Needs at least " + s.min_solve + " views" : "Fit the camera model to the " + plural(s.samples, "view");
+    if (s.video.width) $("hud").style.setProperty("--video-ar", s.video.width + " / " + s.video.height);
+    drawCoverage(s);
+    if (look && s.sequence !== calib.previewSeq && !calib.previewLoading) {
+      calib.previewSeq = s.sequence;
+      calib.previewLoading = true;
+      const img = $("hud-preview");
+      img.onload = img.onerror = () => { calib.previewLoading = false; };
+      img.src = "/api/calibration/preview.jpg?s=" + s.sequence;
+    }
+  }
+  function drawCoverage(s) {
+    const area = fitCanvas($("hud-coverage"));
+    if (!area) return;
+    const { ctx, width, height } = area;
+    const coverage = s.coverage;
+    if (coverage) {
+      const cw = width / coverage.cols, ch = height / coverage.rows;
+      for (let row = 0; row < coverage.rows; row++) {
+        for (let col = 0; col < coverage.cols; col++) {
+          const n = coverage.cells[row][col];
+          if (n > 0) {
+            ctx.fillStyle = "rgba(129, 137, 255, " + Math.min(0.9, 0.32 + 0.16 * n) + ")";
+            ctx.beginPath(); ctx.roundRect(col * cw + 1, row * ch + 1, cw - 2, ch - 2, 2); ctx.fill();
+          } else {
+            ctx.strokeStyle = "rgba(255, 255, 255, 0.09)"; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.roundRect(col * cw + 1.5, row * ch + 1.5, cw - 3, ch - 3, 2); ctx.stroke();
+          }
+        }
+      }
+    }
+    const look = s.last;
+    if (look && look.points && look.age_s < 1.5) {
+      ctx.fillStyle = look.accepted ? "#3ecf8e" : "#ffffff";
+      for (const [x, y] of look.points) { ctx.beginPath(); ctx.arc(x * width, y * height, 1.7, 0, Math.PI * 2); ctx.fill(); }
+    }
+  }
+
+  // step 3: solve and save
+  async function solveCalib() {
+    if (calib.solving) return;
+    if (calib.boardShown) exitBoard(false);
+    calib.solving = true;
+    calib.saved = false;
+    showStep("result");
+    const result = await post("/api/calibration/solve", {}).catch(() => ({ ok: false, message: "Could not reach the receiver." }));
+    calib.solving = false;
+    if (!result.ok) { toast(result.message, "bad"); await refreshCalib(); showStep("capture"); return; }
+    await refreshCalib();
+    showStep("result");
+  }
+  function metric(label, value, sub, tone) {
+    const box = el("div", "metric" + (tone ? " " + tone : ""));
+    box.append(el("span", "label", label), el("span", "big num", value), el("small", null, sub));
+    return box;
+  }
+  function renderResult() {
+    const box = $("result-body");
+    if (calib.solving) {
+      const views = calibState && calibState.session ? calibState.session.samples : 0;
+      const wait = el("div", "solving");
+      wait.append(el("div", "spinner"), el("b", null, "Solving"), el("span", null, "Fitting the pinhole and fisheye models to " + plural(views, "view") + ", then checking each on views it did not see."));
+      box.replaceChildren(wait);
+      return;
+    }
+    const session = calibState && calibState.session, sol = session && session.solution;
+    if (!sol) { box.replaceChildren(el("div", "solving", "Nothing solved yet.")); return; }
+    const grid = el("div", "result-grid");
+    const figure = el("figure", "undist");
+    const pic = el("div", "undist-pic");
+    const img = el("img");
+    img.alt = "One of the views as captured, and undistorted with this calibration";
+    img.addEventListener("load", () => { pic.style.aspectRatio = img.naturalWidth + " / " + img.naturalHeight; });
+    img.src = "/api/calibration/undistorted.jpg?c=" + encodeURIComponent(sol.created);
+    pic.appendChild(img);
+    const caption = el("figcaption");
+    const left = el("span"); left.append(el("b", null, "As captured"), document.createTextNode("Board lines bend near the edges"));
+    const right = el("span"); right.append(el("b", null, "Undistorted"), document.createTextNode("They should be straight"));
+    caption.append(left, right);
+    figure.append(pic, caption);
+
+    const side = el("div", "step-side");
+    const head = el("div");
+    head.append(el("h3", null, "Calibration result"));
+    const why = el("p", "why");
+    why.append(icon("sparkle"), el("span", null, sol.why));
+    const rms = sol.rms_px;
+    const fov = sol.fov_deg || {};
+    const metrics = el("div", "metrics");
+    metrics.append(
+      metric("Error", fixed(rms, 2) + " px", "RMS reprojection · " + sol.views_used + " of " + plural(sol.views, "view"), rms < 0.5 ? "good" : rms < 1 ? "warn" : "bad"),
+      metric("Field of view", fixed(fov.horizontal, 1) + "° × " + fixed(fov.vertical, 1) + "°", "Diagonal " + fixed(fov.diagonal, 1) + "°", ""),
+    );
+    const details = el("div", "result-panel");
+    const dl = el("dl", "kv"); dl.id = "result-kv";
+    details.appendChild(dl);
+    const bars = el("div", "result-panel");
+    const chart = el("div", "bars");
+    const errors = sol.per_view_px;
+    const peak = Math.max(0.01, ...errors.filter(isNum));
+    errors.forEach((value, i) => {
+      const bar = el("i", value === null ? "dropped" : "");
+      bar.style.height = (value === null ? 100 : Math.max(3, (value / peak) * 100)) + "%";
+      bar.title = "View " + (i + 1) + ": " + (value === null ? "dropped (error over 3× the median)" : fixed(value, 3) + " px");
+      chart.appendChild(bar);
+    });
+    const legend = el("div", "bars-legend");
+    legend.append(el("span", null, "View 1"), el("span", null, sol.dropped.length ? plural(sol.dropped.length, "view") + " dropped (red)" : "No view dropped"),
+      el("span", null, "max " + fixed(peak, 2) + " px"));
+    bars.append(el("span", "label", "Error per view"), chart, legend);
+    const actions = el("div", "step-actions");
+    if (calib.saved) {
+      const banner = el("div", "saved-banner");
+      banner.append(icon("check"), el("span", null, "Saved. New recordings get this calibration."));
+      const done = el("button", "btn primary", "Done"); done.type = "button"; done.addEventListener("click", closeCalib);
+      actions.append(done);
+      side.append(head, why, metrics, banner, details, bars, actions);
+    } else {
+      const save = el("button", "btn primary"); save.type = "button"; save.append(icon("check"), el("span", null, "Save calibration"));
+      save.addEventListener("click", saveCalib);
+      const more = el("button", "btn", "Capture more"); more.type = "button"; more.addEventListener("click", () => showStep("capture"));
+      const over = el("button", "btn ghost", "Start over"); over.type = "button"; over.addEventListener("click", resetCalib);
+      actions.append(save, more, over);
+      side.append(head, why, metrics, actions, details, bars);
+    }
+    grid.append(figure, side);
+    box.replaceChildren(grid);
+    const held = sol.held_out_px || {};
+    kvRows("result-kv", [
+      ["Model", words(sol.model) + (sol.model === "pinhole" ? " (k1 k2 p1 p2 k3)" : " (k1 k2 k3 k4)")],
+      ["fx · fy", fixed(sol.fx, 2) + " · " + fixed(sol.fy, 2) + " px"],
+      ["cx · cy", fixed(sol.cx, 2) + " · " + fixed(sol.cy, 2) + " px"],
+      ["Distortion", sol.dist.map((v) => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(4)).join(" "), "", sol.dist.join(", ")],
+      ["Held-out error", "pinhole " + fixed(held.pinhole, 3) + " · fisheye " + fixed(held.fisheye, 3) + " px", "",
+        "RMS error on views left out of each fit (5-fold): the model with the lower one is kept; fisheye only when clearly lower"],
+      ["Video size", sol.width + "×" + sol.height],
+    ]);
+  }
+  async function saveCalib() {
+    const result = await post("/api/calibration/save", {}).catch(() => ({ ok: false, message: "Could not reach the receiver." }));
+    if (!result.ok) { toast(result.message, "bad"); return; }
+    calib.saved = true;
+    toast(result.message, "good");
+    await refreshCalib();
+    renderResult();
+  }
+  async function resetCalib() {
+    await post("/api/calibration/reset", {}).catch(() => {});
+    calib.saved = false;
+    await refreshCalib();
+    showStep("capture");
+  }
+  $("calib-open").addEventListener("click", openCalib);
+  $("calib-close").addEventListener("click", closeCalib);
+  $("board-show").addEventListener("click", showBoard);
+  $("capture-solve").addEventListener("click", solveCalib);
+  $("capture-reset").addEventListener("click", resetCalib);
+  $("hud-exit").addEventListener("click", () => exitBoard());
+  $("hud-guide").addEventListener("animationend", () => $("hud-guide").classList.remove("got"));
+  $("hud-solve").addEventListener("click", solveCalib);
+  for (const li of $("calib-steps").children) {
+    li.addEventListener("click", () => {
+      if (!li.classList.contains("done") || calib.solving) return;
+      if (li.dataset.step === "scale") calib.widthCss = CARD_MM[0] * cssPxPerMm(storedScale());
+      showStep(li.dataset.step);
+    });
+  }
+  document.addEventListener("keydown", (event) => {
+    if (!calib.open || event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      if (calib.boardShown) exitBoard();  // in full screen the browser leaves it first; fullscreenchange does the rest
+      else closeCalib();
+      return;
+    }
+    if (calib.boardShown || calib.step !== "scale") return;
+    const step = event.shiftKey ? 5 : 0.5;
+    if (["ArrowRight", "ArrowUp", "+", "="].includes(event.key)) { event.preventDefault(); nudge(step); }
+    else if (["ArrowLeft", "ArrowDown", "-", "_"].includes(event.key)) { event.preventDefault(); nudge(-step); }
+  });
+
+  // ---------------------------------------------------------------- body measurements
+
+  function parseCm(text) {  // undefined: not a number; null: empty (the default)
+    const value = String(text || "").trim().replace(",", ".");
+    if (!value) return null;
+    if (!/^\d+(\.\d+)?$/.test(value)) return undefined;
+    return parseFloat(value);
+  }
+  function fieldError(field, text) {
+    const value = parseCm(text);
+    if (value === undefined) return "A number of centimetres, such as " + cm(field.default_m);
+    if (value === null) return "";
+    if (value < field.min_m * 100 || value > field.max_m * 100) return "Between " + +(field.min_m * 100).toFixed(1) + " and " + +(field.max_m * 100).toFixed(1) + " cm for an adult";
+    return "";
+  }
+  function showFieldError(row, message) {
+    row.classList.toggle("invalid", !!message);
+    const err = row.querySelector(".merr");
+    err.hidden = !message;
+    setText(err, message || "");
+    row.querySelector("input").setAttribute("aria-invalid", String(!!message));
+  }
+  function highlight(key) {
+    const svg = $("body-svg");
+    svg.classList.toggle("focus", !!key);
+    for (const g of svg.querySelectorAll(".m")) g.classList.toggle("on", g.dataset.m === key);
+    for (const row of $("body-fields").children) row.classList.toggle("on", row.dataset.key === key);
+    const field = key && profileState ? profileState.fields.find((f) => f.key === key) : null;
+    const index = field ? profileState.fields.indexOf(field) + 1 : 0;
+    setText($("body-caption"), field ? index + " · " + field.label + ": " + field.definition.charAt(0).toLowerCase() + field.definition.slice(1) : "Hover or focus a field to see where it goes");
+  }
+  function focusedKey() {
+    const row = document.activeElement && document.activeElement.closest ? document.activeElement.closest(".mfield") : null;
+    return row ? row.dataset.key : null;
+  }
+  function openBody() {
+    if (!profileState) { toast("Body measurements are still loading.", ""); return; }
+    const p = profileState.profile;
+    const box = $("body-fields");
+    box.replaceChildren(...profileState.fields.map((field, i) => {
+      const row = el("div", "mfield");
+      row.dataset.key = field.key;
+      const label = el("label");
+      label.htmlFor = "m-" + field.key;
+      label.append(el("b", null, field.label), el("small", null, field.definition));
+      const wrap = el("div", "minput");
+      const input = el("input");
+      input.id = "m-" + field.key;
+      input.type = "text";
+      input.inputMode = "decimal";
+      input.autocomplete = "off";
+      input.spellcheck = false;
+      input.placeholder = cm(field.default_m);
+      input.value = p.measured[field.key] ? cm(p[field.key]) : "";
+      input.setAttribute("aria-describedby", "e-" + field.key);
+      wrap.append(input, el("span", null, "cm"));
+      const err = el("p", "merr");
+      err.id = "e-" + field.key;
+      err.hidden = true;
+      row.append(el("span", "mnum", String(i + 1)), label, wrap, err);
+      row.addEventListener("mouseenter", () => highlight(field.key));
+      row.addEventListener("mouseleave", () => highlight(focusedKey()));
+      input.addEventListener("focus", () => highlight(field.key));
+      input.addEventListener("blur", () => { highlight(null); showFieldError(row, fieldError(field, input.value)); });
+      input.addEventListener("input", () => { if (row.classList.contains("invalid")) showFieldError(row, fieldError(field, input.value)); });
+      return row;
+    }));
+    setText($("body-status"), "");
+    highlight(null);
+    $("body").showModal();
+    $("body-title").focus();  // not an input: on a phone that would open the keyboard at once
+  }
+  for (const g of $("body-svg").querySelectorAll(".m")) {
+    g.addEventListener("mouseenter", () => highlight(g.dataset.m));
+    g.addEventListener("mouseleave", () => highlight(focusedKey()));
+    g.addEventListener("click", () => { const input = $("m-" + g.dataset.m); if (input) input.focus(); });
+  }
+  $("body-open").addEventListener("click", openBody);
+  $("body-cancel").addEventListener("click", () => $("body").close());
+  $("body-clear").addEventListener("click", () => {
+    for (const row of $("body-fields").children) { row.querySelector("input").value = ""; showFieldError(row, ""); }
+    setText($("body-status"), "Cleared: Save to use the averages");
+  });
+  $("body-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const changes = {};
+    let firstBad = null;
+    for (const row of $("body-fields").children) {
+      const field = profileState.fields.find((f) => f.key === row.dataset.key);
+      const input = row.querySelector("input");
+      const message = fieldError(field, input.value);
+      showFieldError(row, message);
+      if (message && !firstBad) firstBad = input;
+      const value = parseCm(input.value);
+      changes[field.key] = value === null || value === undefined ? null : Math.round(value * 10) / 1000;
+    }
+    if (firstBad) { setText($("body-status"), "Check the fields in red"); firstBad.focus(); return; }
+    $("body-save").disabled = true;
+    const result = await post("/api/profile", changes).catch(() => ({ ok: false, message: "Could not reach the receiver." }));
+    $("body-save").disabled = false;
+    if (!result.ok) {
+      for (const [key, message] of Object.entries(result.errors || {})) {
+        const row = $("body-fields").querySelector('[data-key="' + key + '"]');
+        if (row) showFieldError(row, message.replace(/^[^:]+: /, ""));
+      }
+      setText($("body-status"), result.message);
+      return;
+    }
+    profileState = result;
+    renderBodyCard();
+    $("body").close();
+    toast(result.message, "good");
+  });
+
   buildHops();
   buildMotion();
   poll();
   loadRecordings();
+  loadSetup();
   setInterval(loadRecordings, LIST_MS);
+  setInterval(() => { if (!calib.open) loadSetup(); }, 60000);
 })();
 </script>
 </body>

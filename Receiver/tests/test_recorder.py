@@ -150,3 +150,69 @@ def test_malformed_vectors_become_empty_cells(tmp_path, plant, bad):
     recording.write_motion({"t": 1, "a": bad}, 2)
     recording.close()
     assert rows(recording.directory / "motion.csv")[1][2:5] == ["", "", ""]
+
+
+# ---------------------------------------------------------------- calibration and body measurements
+
+
+def write_setup(state, width=540, height=960, profile=True):
+    (state / "calibration").mkdir(parents=True)
+    calibration = {"version": 1, "model": "pinhole", "width": width, "height": height,
+                   "K": [[500.0, 0, 269.5], [0, 500.0, 479.5], [0, 0, 1]], "dist": [0.0] * 5, "rms_px": 0.3,
+                   "created": "2026-11-21T03:00:00Z", "device": "Ray-Ban Meta", "source": "charuco-web"}
+    (state / "calibration" / "current.json").write_text(json.dumps(calibration))
+    if profile:
+        (state / "profile.json").write_text(json.dumps({"version": 1, "hand_length_m": 0.2, "measured": {"hand_length_m": True, "palm_width_m": False}}))
+    return calibration
+
+
+def test_a_recording_gets_a_copy_of_the_calibration_and_the_profile(tmp_path, plant):
+    fmt, packets = plant
+    calibration = write_setup(tmp_path / "state")
+    recording = Recording(tmp_path / "out", fmt, {}, setup_dir=tmp_path / "state")
+    # the state may change during the recording: the copy is what was in use when it started
+    (tmp_path / "state" / "calibration" / "current.json").write_text("{}")
+    recording.close()
+    folder = recording.directory
+    assert json.loads((folder / "calibration.json").read_text()) == calibration
+    assert (folder / "profile.json").read_bytes() == (tmp_path / "state" / "profile.json").read_bytes()
+    info = json.loads((folder / "info.json").read_text())
+    assert info["calibration"] == {"file": "calibration.json", "model": "pinhole", "width": 540, "height": 960, "rms_px": 0.3,
+                                   "created": "2026-11-21T03:00:00Z", "source": "charuco-web"}
+    assert info["profile"] == {"file": "profile.json", "measured": ["hand_length_m"]}
+
+
+def test_a_calibration_of_another_size_is_still_copied_with_a_note(tmp_path, plant):
+    fmt, packets = plant  # 540x960
+    write_setup(tmp_path / "same", 720, 1280, profile=False)
+    write_setup(tmp_path / "other", 1280, 720, profile=False)
+    same = Recording(tmp_path / "out", fmt, {}, setup_dir=tmp_path / "same")
+    other = Recording(tmp_path / "out", fmt, {}, setup_dir=tmp_path / "other")
+    for recording in (same, other):
+        recording.close()
+        assert (recording.directory / "calibration.json").is_file()
+        assert not (recording.directory / "profile.json").exists()
+    note = json.loads((same.directory / "info.json").read_text())["calibration"]["note"]
+    assert note == "calibrated at 720x1280, this video is 540x960: same aspect ratio, the pipeline rescales K"
+    note = json.loads((other.directory / "info.json").read_text())["calibration"]["note"]
+    assert "different aspect ratio" in note and "calibrate again" in note
+    assert "adult averages" in json.loads((same.directory / "info.json").read_text())["profile"]["note"]
+
+
+def test_without_calibration_or_profile_nothing_is_copied_and_info_says_so(tmp_path, plant):
+    fmt, packets = plant
+    (tmp_path / "state").mkdir()
+    for setup_dir in (tmp_path / "state", None):
+        recording = Recording(tmp_path / "out", fmt, {}, setup_dir=setup_dir)
+        recording.close()
+        names = {path.name for path in recording.directory.iterdir()}
+        assert "calibration.json" not in names and "profile.json" not in names
+        info = json.loads((recording.directory / "info.json").read_text())
+        assert info["calibration"]["file"] is None and info["profile"]["file"] is None
+        assert info["calibration"]["note"] and info["profile"]["note"]
+    (tmp_path / "state" / "calibration").mkdir()
+    (tmp_path / "state" / "calibration" / "current.json").write_text("[1, 2")
+    recording = Recording(tmp_path / "out", fmt, {}, setup_dir=tmp_path / "state")
+    recording.close()
+    assert not (recording.directory / "calibration.json").exists()
+    assert "not a valid calibration" in json.loads((recording.directory / "info.json").read_text())["calibration"]["note"]
