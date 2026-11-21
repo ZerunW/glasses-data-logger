@@ -2268,7 +2268,7 @@ dialog.wide[open] { display: flex; flex-direction: column; }
       if (row[3]) dd.title = row[3];
       fragment.appendChild(dd);
     }
-    const key = rows.map((r) => r ? r[0] + "=" + (r[1] instanceof Node ? r[1].textContent : r[1]) + (r[2] || "") : "").join("|");
+    const key = rows.map((r) => r ? r[0] + "=" + (r[1] instanceof Node ? r[1].textContent : r[1]) + (r[2] || "") + "~" + (r[3] || "") : "").join("|");
     if (box.dataset.key !== key) { box.dataset.key = key; box.replaceChildren(fragment); }
   }
 
@@ -2362,6 +2362,25 @@ dialog.wide[open] { display: flex; flex-direction: column; }
     setText($("vcam-position-value"), bandText(position));
   }
 
+  // Which device the camera writes to: the open one, or on Linux the v4l2loopback device it
+  // would open (--virtual-camera-device, else the one labelled GlassesData, else the first).
+  function vcamDevice(vc) {
+    if (vc.running && vc.device) {
+      // With a label (Linux) the row stays short: the backend goes to the tooltip.
+      return vc.device_label ? [vc.device + " · " + vc.device_label, "", vc.device + " (" + vc.device_label + ") · " + (vc.backend || "")]
+        : [vc.device + (vc.backend ? " · " + vc.backend : ""), "", vc.device];
+    }
+    const lb = vc.loopback;
+    if (!lb) return [vc.requested_device || "–", "", ""];
+    const list = lb.devices.map((d) => d.path + (d.label ? " (" + d.label + ")" : "")).join(", ");
+    if (!lb.module_loaded) return ["No v4l2loopback device", "bad", "The v4l2loopback module is not loaded"];
+    if (!lb.devices.length) return ["v4l2loopback has no device", "bad", "The v4l2loopback module is loaded without a device"];
+    const own = lb.devices.find((d) => d.label === "GlassesData");
+    const text = vc.requested_device ? vc.requested_device + " · requested"
+      : own ? own.path + " · GlassesData" : lb.devices[0].path + (lb.devices[0].label ? " · " + lb.devices[0].label : "") + " · first found";
+    return [text, "", "v4l2loopback devices: " + list];
+  }
+
   function renderVcam(st) {
     const vc = st.vcam, setUp = vcamSetUp(vc);
     $("vcam-panel").hidden = !setUp;
@@ -2370,7 +2389,8 @@ dialog.wide[open] { display: flex; flex-direction: column; }
     if (!setUp) { stopPreview(); return; }
     const on = vc.running;
     const live = on && vc.showing === "video";
-    const unavailable = !on && (!vc.available || !!vc.last_error);
+    const noDevice = !on && !!vc.loopback && !vc.loopback.devices.length;
+    const unavailable = !on && (!vc.available || !!vc.last_error || noDevice);
 
     const sw = $("vcam-switch");
     sw.setAttribute("aria-checked", String(on));
@@ -2384,7 +2404,7 @@ dialog.wide[open] { display: flex; flex-direction: column; }
 
     const tag = $("vcam-tag");
     setClass(tag, live ? "tag good" : on ? "tag accent" : unavailable ? "tag bad" : "tag");
-    setText(tag, live ? "Live" : on ? "On · no video" : !vc.available ? "Not installed" : vc.last_error ? "Unavailable" : "Off");
+    setText(tag, live ? "Live" : on ? "On · no video" : !vc.available ? "Not installed" : vc.last_error ? "Unavailable" : noDevice ? "No device" : "Off");
 
     for (const b of document.querySelectorAll("#vcam-panel [data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === vc.mode));
     setText($("vcam-mode-note"), vc.mode === "fill" ? "A band fills the picture" : "The whole frame, blurred sides");
@@ -2400,17 +2420,21 @@ dialog.wide[open] { display: flex; flex-direction: column; }
       : unavailable ? "Unavailable" : "Off. Press V to send the glasses video to Zoom and other apps.");
     if (on && pageVisible) startPreview(); else stopPreview();
 
+    const device = vcamDevice(vc), loopback = vc.backend === "v4l2loopback" || (!on && !!vc.loopback);
+    const lookIn = loopback ? "check in Zoom or Meet, or run ffplay " + (vc.device || "/dev/video10") : "check in Zoom or QuickTime";
     kvRows("vcam-kv", [
-      ["Device", vc.device ? vc.device + (vc.backend ? " · " + vc.backend : "") : "–", "", vc.device || ""],
-      ["Sends", vc.width + "×" + vc.height + " at " + vc.fps + " fps" + (on ? " · " + grouped(vc.frames_sent) + " frames" : "")],
+      ["Device", device[0], device[1], device[2]],
+      ["Sends", vc.width + "×" + vc.height + " at " + vc.fps + " fps" + (on ? " · " + grouped(vc.frames_sent) + " frames" : ""), "",
+        loopback ? "Written to the device as I420 (YUV 4:2:0), the format browsers, Zoom and OBS read" : ""],
       on && vc.check ? ["Check", /rejected/.test(vc.check) ? "OBS rejects the frames" : "No complaint from the device", /rejected/.test(vc.check) ? "bad" : "",
-        vc.check + ". Whether an app receives the picture cannot be seen from here: check in Zoom or QuickTime."] : null,
+        vc.check + ". Whether an app receives the picture cannot be seen from here: " + lookIn + "."] : null,
     ]);
 
     let title = "", text = "";
     if (on && vc.last_error) { title = "Apps receive nothing"; text = vc.last_error; }
     else if (!on && !vc.available) { title = "pyvirtualcam is not installed"; text = vc.hint || ""; }
     else if (!on && vc.last_error) { title = sentence(vc.last_error); text = vc.hint || ""; }
+    else if (noDevice) { title = "No v4l2loopback device"; text = vc.hint || ""; }
     const notice = $("vcam-notice");
     notice.hidden = !title;
     notice.classList.toggle("bad", !!title);

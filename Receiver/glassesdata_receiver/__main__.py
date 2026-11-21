@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import threading
@@ -56,6 +57,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--virtual-camera-mode", default="fit", choices=["fit", "fill"],
         help="fit: the whole portrait frame with blurred sides (default); fill: a landscape band that covers the picture",
+    )
+    parser.add_argument(
+        "--virtual-camera-device", metavar="DEV",
+        help="Linux: the v4l2loopback device to write to, such as /dev/video10 (default: the one labelled "
+        "GlassesData, else the first v4l2loopback device). Ignored on macOS, where the camera is OBS's",
     )
     parser.add_argument("--overlay", action="store_true", help="draw the hand skeleton on the virtual camera picture")
     parser.add_argument(
@@ -114,8 +120,13 @@ def main(argv: list[str] | None = None) -> int:
     # only imported when it starts, and a failure leaves the receiver running.
     from .vcam import VirtualCamera, parse_size
 
+    device = args.virtual_camera_device
+    if device and not sys.platform.startswith("linux"):
+        log.warning("--virtual-camera-device only applies on Linux (v4l2loopback); ignoring %s", device)
+        device = None
     virtual_camera = VirtualCamera(
-        receiver, parse_size(args.virtual_camera_size), mode=args.virtual_camera_mode, overlay=args.overlay
+        receiver, parse_size(args.virtual_camera_size), mode=args.virtual_camera_mode, overlay=args.overlay,
+        device=device,
     )
     workers: list[threading.Thread] = []
     web = None
@@ -164,10 +175,34 @@ def _start_web(args: argparse.Namespace, receiver: Receiver, virtual_camera: Any
     url = web.url(display)
     print(f"WEB_URL={url}", flush=True)
     if args.open:
-        import webbrowser
-
-        webbrowser.open(url)
+        open_browser(url, log)
     return web
+
+
+def open_browser(url: str, log: logging.Logger) -> bool:
+    """Open the page in the default browser; say so when that cannot work.
+
+    On Linux there must be a graphical session: without DISPLAY or WAYLAND_DISPLAY (an SSH
+    login, a text console) Python's webbrowser would fall back to a text browser such as
+    lynx inside this terminal, so it is not tried. Run as root (sudo), the desktop's
+    browser (Firefox is a snap on Ubuntu) refuses to start, so that is skipped too."""
+    if sys.platform.startswith("linux"):
+        if not (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")):
+            log.warning("No graphical session (DISPLAY and WAYLAND_DISPLAY are unset): open %s in a browser yourself", url)
+            return False
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            log.warning("Not opening a browser as root (the receiver needs no sudo): open %s yourself", url)
+            return False
+    import webbrowser
+
+    try:
+        opened = webbrowser.open(url)
+    except Exception as error:  # a broken BROWSER variable, a missing helper
+        log.warning("Could not open a browser (%s): open %s yourself", error, url)
+        return False
+    if not opened:
+        log.warning("No browser could be opened: open %s yourself", url)
+    return bool(opened)
 
 
 def _run(
@@ -182,9 +217,7 @@ def _run(
         workers.append(thread)
         thread.start()
 
-    # Handle Ctrl-C and SIGTERM (systemd, kill) the same way on macOS and Linux.
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
-    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    install_signal_handlers(stop)
 
     if args.usb:
         from .link import UsbSource
@@ -232,6 +265,16 @@ def _run(
 
         frame = receiver.latest_frame() if receiver.busy else None
         save_snapshot(args.snapshot, frame, receiver.latest_hands(), receiver.hands_active)
+
+
+def install_signal_handlers(stop: threading.Event) -> None:
+    """Ctrl-C, SIGTERM (systemd, kill) and SIGHUP (the terminal window closed) all stop the
+    receiver the same way on macOS and Linux: the recording is closed and the threads joined.
+    SIGHUP only when it is not ignored already: under nohup the receiver must keep running."""
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    if hasattr(signal, "SIGHUP") and signal.getsignal(signal.SIGHUP) == signal.SIG_DFL:
+        signal.signal(signal.SIGHUP, lambda *_: stop.set())
 
 
 def _auto_record(receiver: Receiver, stop: threading.Event) -> None:

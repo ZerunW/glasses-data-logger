@@ -11,7 +11,7 @@ from glassesdata_receiver import link, paths, session
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    for variable in ("XDG_STATE_HOME", "XDG_CACHE_HOME"):
+    for variable in ("XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"):
         monkeypatch.delenv(variable, raising=False)
     return tmp_path
 
@@ -67,7 +67,8 @@ def test_computer_name_on_linux(monkeypatch, tmp_path):
     assert session.computer_name(str(info)) == "lab-laptop"
 
 
-def test_usbmuxd_hint_per_platform(monkeypatch):
+def test_usbmuxd_hint_per_platform(monkeypatch, tmp_path):
+    monkeypatch.setattr(link, "USB_DEVICES", str(tmp_path))  # no iPhone on this fake bus, whatever is plugged in
     error = OSError("could not connect to usbmuxd at '/var/run/usbmuxd'")
     monkeypatch.setattr("sys.platform", "darwin")
     assert link.usbmuxd_unavailable(error).startswith("usbmuxd unavailable (")

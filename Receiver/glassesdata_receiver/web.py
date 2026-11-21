@@ -162,7 +162,8 @@ def _clean(value: Any) -> Any:
 
 
 VCAM_NOT_SET_UP = {
-    "available": False, "running": False, "device": None, "backend": None, "width": None, "height": None, "fps": None,
+    "available": False, "running": False, "device": None, "device_label": None, "requested_device": None,
+    "loopback": None, "backend": None, "width": None, "height": None, "fps": None,
     "mode": None, "position": None, "overlay": False, "frames_sent": 0, "showing": None, "check": None,
     "last_error": "this receiver has no virtual camera output", "hint": None,
 }

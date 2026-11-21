@@ -12,7 +12,7 @@ The receiver is a command-line process; it never opens a window. Open the page i
 
 ## Setup
 
-Python 3.11. Create the virtual environment **outside** any cloud-synced folder (OneDrive, iCloud Drive, Dropbox): syncing thousands of small files breaks or slows the environment.
+Python 3.11 on macOS; on Ubuntu 24.04 its own Python 3.12, set up by one script (see Ubuntu 24.04). Create the virtual environment **outside** any cloud-synced folder (OneDrive, iCloud Drive, Dropbox): syncing thousands of small files breaks or slows the environment.
 
 ```sh
 python3.11 -m venv ~/.venvs/glassesdata-receiver
@@ -25,7 +25,7 @@ Run everything from this `Receiver/` folder with that interpreter (below, `pytho
 
 | | macOS | Linux |
 |---|---|---|
-| recordings (`--out`) | `~/Movies/GlassesData` | `~/Videos/GlassesData` |
+| recordings (`--out`) | `~/Movies/GlassesData` | `GlassesData` in the desktop's Videos folder: `~/Videos/GlassesData`, or the folder's name in the session's language (`XDG_VIDEOS_DIR` in `~/.config/user-dirs.dirs`, such as `~/视频/GlassesData`) |
 | state (`--state-dir`): Wi-Fi identity, `calibration/`, `profile.json` | `~/Library/Application Support/GlassesData` | `$XDG_STATE_HOME/glassesdata` (default `~/.local/state/glassesdata`) |
 | hand model cache | `~/Library/Caches/GlassesData` | `$XDG_CACHE_HOME/glassesdata` (default `~/.cache/glassesdata`) |
 
@@ -58,7 +58,7 @@ A dark monitoring surface (it follows the browser's light or dark setting), made
 | Path | Method | Answer |
 |---|---|---|
 | `/` | GET | the page (one file, inline CSS and JS) |
-| `/api/status` | GET | JSON: `link` (connected, text, kind, device, per-source `sources` texts), `video` (format, has_frame, `glasses_fps`, `phone_sent_fps`, `received_fps`, `decoded_fps`, `phone_dropped_frames`, `phone_dropped_fps`, `delay_ms`, `rtt_ms`, `display_skipped`, `decode_errors`, `decode_backlog`, `preview_lag_s`: how far the newest decoded frame is behind real time, see Preview lag; from newer phones, else null: `phone_queue_frames` (video frames waiting on the phone), `phone_record_priority` (the phone buffers instead of dropping because this computer records), `phone_gaps` (drop episodes since connecting)), `hands` (available, enabled, error, fps, process_ms, count, detected), `motion` (accel, gyro, mag, source, samples_per_s), `glasses` (state, inputs), `recording` (active, name, seconds, frames, note, waiting_for_keyframe, last, folder), `wifi` (enabled, pairing_ready, pair_at_start), `vcam` (available: pyvirtualcam can be imported, running, device, backend, width, height, fps, mode, position, overlay, frames_sent, showing: `video` or `card`, check: the start-up check's result, last_error, hint: what to do, in words). The page polls it 4 times a second. |
+| `/api/status` | GET | JSON: `link` (connected, text, kind, device, per-source `sources` texts), `video` (format, has_frame, `glasses_fps`, `phone_sent_fps`, `received_fps`, `decoded_fps`, `phone_dropped_frames`, `phone_dropped_fps`, `delay_ms`, `rtt_ms`, `display_skipped`, `decode_errors`, `decode_backlog`, `preview_lag_s`: how far the newest decoded frame is behind real time, see Preview lag; from newer phones, else null: `phone_queue_frames` (video frames waiting on the phone), `phone_record_priority` (the phone buffers instead of dropping because this computer records), `phone_gaps` (drop episodes since connecting)), `hands` (available, enabled, error, fps, process_ms, count, detected), `motion` (accel, gyro, mag, source, samples_per_s), `glasses` (state, inputs), `recording` (active, name, seconds, frames, note, waiting_for_keyframe, last, folder), `wifi` (enabled, pairing_ready, pair_at_start), `vcam` (available: pyvirtualcam can be imported, running, device, device_label: the name apps show (Linux), requested_device: `--virtual-camera-device`, loopback: on Linux `{"module_loaded", "devices": [{"path", "label"}]}`, else null, backend, width, height, fps, mode, position, overlay, frames_sent, showing: `video` or `card`, check: the start-up check's result, last_error, hint: what to do, in words; on Linux also before any start when there is no v4l2loopback device). The page polls it 4 times a second. |
 | `/api/history` | GET | JSON `{"interval_s", "seconds", "fields", "rows"}`: the last 30 s of per-hop frame rates, counters (dropped frames, display skips, decode errors), delay and motion, one row every 0.1 s (values are null while nothing is connected); `?since=T` returns only rows after time `T`. The page's charts use it. |
 | `/api/live.mjpg` | GET | MJPEG like `/api/stream.mjpg` but without the skeleton drawn in. Every part carries `X-Frame` (the frame index) and `X-Hands`, compact JSON `{"frame", "enabled", "lag", "hands": [{"side", "score", "points": [x0, y0, ... x20, y20]}]}` (normalised to the image), so the page draws each frame's skeleton from the same part as its picture. When the tracker keeps up, the encoder waits briefly (at most 60 ms) for the result of that very frame (`lag` 0); otherwise `lag` says how many frames older the landmarks are. |
 | `/api/stream.mjpg` | GET | MJPEG (`multipart/x-mixed-replace; boundary=gdframe`): the decoded frame with the skeleton, at most 720 px tall, JPEG quality 80, at most the video's frame rate. Each viewer gets the newest frame and skips what it was too slow for; a stalled viewer never slows decoding or recording and is dropped after 10 s. The page falls back to it when the browser cannot read a streaming `fetch`. |
@@ -116,7 +116,7 @@ The pipeline sizes the hand and arm model from six measurements (PIPELINE.md sec
 python -m glassesdata_receiver --usb
 ```
 
-The receiver reaches the app through `usbmuxd` (part of macOS; the `usbmuxd` package on Linux); the cable and the iPhone's trust prompt are the security boundary, so there is no pairing and no encryption.
+The receiver reaches the app through `usbmuxd` (part of macOS; the `usbmuxd` package on Linux); the cable and the iPhone's trust prompt are the security boundary, so there is no pairing step of the receiver's own and no encryption. On Linux, trust the computer once (Ubuntu 24.04 > USB).
 
 **Wi-Fi**: the iPhone connects to the computer over TLS 1.3. Pair once:
 
@@ -204,7 +204,7 @@ Use the rows with the smallest `rtt_ns`: they carry the least queueing error. Fo
 The live tracker only works on the newest frame and skips frames when it falls behind. To track every frame of a recording afterwards:
 
 ```sh
-python -m glassesdata_receiver.offline ~/Movies/GlassesData/2026-11-20_212051   # ~/Videos/GlassesData/... on Linux [--max-hands 2] [--mirrored-input]
+python -m glassesdata_receiver.offline ~/Movies/GlassesData/2026-11-20_212051   # on Linux the Videos folder, see Folders [--max-hands 2] [--mirrored-input]
 ```
 
 It writes `hands_offline.csv` (same columns as `hands.csv`) into the folder, taking `pts_us` and `phone_time_ns` from `frames.csv` by frame index, and prints a one-line summary.
@@ -235,7 +235,7 @@ Zoom, Meet, Teams and other apps can use the glasses video as a webcam. The rece
 
 1. `~/.venvs/glassesdata-receiver/bin/pip install pyvirtualcam` (0.15 or later). Without it everything else works, and the page says it is missing.
 2. **macOS:** install [OBS Studio](https://obsproject.com) (30 or later). Open it and click **Start Virtual Camera** once. macOS asks to allow the OBS camera extension: allow it in System Settings > General > Login Items & Extensions > Camera Extensions. Then click **Stop Virtual Camera** and quit OBS. macOS only lets a signed camera extension provide a system camera; OBS ships one, so the receiver does not need its own. OBS does not need to run afterwards.
-3. **Linux (Ubuntu 24.04):** pyvirtualcam writes to a v4l2loopback device: `sudo apt install v4l2loopback-dkms`, then `sudo modprobe v4l2loopback devices=1 exclusive_caps=1 card_label=GlassesData` (again after every reboot, or add it to `/etc/modules-load.d`). The same canvas, modes and controls apply. Untested on real hardware so far.
+3. **Linux (Ubuntu 24.04):** pyvirtualcam writes to a v4l2loopback device, `/dev/video10` labelled GlassesData: `scripts/setup_ubuntu.sh` sets it up, by hand see Ubuntu 24.04 > Virtual camera. The same canvas, modes and controls apply.
 4. In the other app, choose the camera **OBS Virtual Camera** (macOS) or **GlassesData** (Linux).
 
 ### Use
@@ -251,8 +251,9 @@ python -m glassesdata_receiver --usb                              # off; start i
 | `--virtual-camera-size 1920x1080\|1280x720` | the picture sent, 1920x1080 by default |
 | `--virtual-camera-mode fit\|fill` | the starting mode (default `fit`) |
 | `--overlay` | start with the hand skeleton drawn into the picture |
+| `--virtual-camera-device /dev/videoN` | Linux: the v4l2loopback device to write to. Default: the one labelled GlassesData, else the first v4l2loopback device. Ignored (with a warning) on macOS |
 
-If pyvirtualcam is missing, or the device cannot be opened (OBS not installed, extension not allowed, v4l2loopback not loaded), the receiver keeps running; the log and the page say why and what to do.
+If pyvirtualcam is missing, or the device cannot be opened (OBS not installed, extension not allowed, v4l2loopback not loaded, no permission, another program writing to it), the receiver keeps running; the log and the page say why and what to do.
 
 **Two ways to fit a portrait video into a landscape picture:**
 
@@ -267,18 +268,106 @@ A landscape source is fitted exactly (16:9) or with blurred bars, or cropped to 
 
 **Delivery cannot be confirmed by the sender.** The virtual camera API only takes frames; it never says whether an app receives them. And the OBS Virtual Camera on macOS only takes landscape 1920x1080 or 1280x720 frames: a frame of any other size (for example the glasses' own 720x1280) is dropped silently. The open succeeds, `send` raises nothing, and OBS only prints `Pixel buffer size mismatch` on standard error. This is why the receiver always sends a landscape canvas of exactly the configured size, never the video's own size.
 
-At start the receiver logs a self-check: the device it opened, the backend, the size and the rate. On macOS it also watches its own standard error for 2 s for OBS's rejection message, and reports it in the log and on the page ("OBS rejects the frames") if it appears. A clean check means only that OBS did not complain. To see the picture arrive, open the camera in an app:
+At start the receiver logs a self-check: the device it opened, the backend, the size and the rate. On macOS it also watches its own standard error for 2 s for OBS's rejection message, and reports it in the log and on the page ("OBS rejects the frames") if it appears. A clean check means only that OBS did not complain. On Linux the check says that v4l2loopback accepted the format and took the frames of the first 2 s without an error; no app needs to be reading. To see the picture arrive, open the camera in an app (on Linux: `ffplay /dev/video10`, or the camera list of Zoom, Meet or OBS):
 
 1. Start the receiver with `--virtual-camera` (or press `V` on the page).
 2. Open QuickTime Player > File > New Movie Recording, and choose **OBS Virtual Camera** from the menu next to the record button.
 
 ## Ubuntu 24.04
 
-**The Linux path is untested on real hardware.** It was written and unit-tested on a Mac (platform branches tested with a simulated `sys.platform`); nobody has yet run it on Ubuntu with an iPhone attached. Expect to report and fix small problems on the first run.
+**Not yet run on Ubuntu.** The Linux code paths were written and unit-tested on a Mac (`tests/test_linux.py` and `tests/test_paths.py` simulate `sys.platform`, sysfs, usbmuxd and pyvirtualcam), and the two scripts below were only checked with `bash -n` and read through. Nobody has run them, or the receiver, on Ubuntu with an iPhone attached. On the first run keep the output of `scripts/setup_ubuntu.sh` and `scripts/check_linux.sh`; expect small fixes.
 
-1. **Python 3.11.** Ubuntu 24.04 ships Python 3.12 and has no `python3.11` package in its own archive. Install 3.11 from the deadsnakes PPA (`sudo add-apt-repository ppa:deadsnakes/ppa && sudo apt install python3.11 python3.11-venv`) or with uv (`uv python install 3.11`, then `uv venv --python 3.11 ~/.venvs/glassesdata-receiver`). The receiver is only tested with 3.11.
-2. **Virtual environment**, as in Setup: `python3.11 -m venv ~/.venvs/glassesdata-receiver` and `pip install -r requirements.txt`. If `import cv2` then fails with `libGL.so.1` or `libgthread` missing (a minimal or server install), `sudo apt install libgl1 libglib2.0-0t64`.
-3. **USB:** `sudo apt install usbmuxd` (and `libimobiledevice-utils` for `idevicepair`). udev starts usbmuxd when an iPhone is plugged in, so before that the page says to plug it in. Unlock the iPhone and tap Trust; `idevicepair validate` checks the pairing. The receiver talks to `/var/run/usbmuxd`, the same socket path as on macOS.
-4. **Firewall.** Ubuntu's `ufw` is off by default. If it is on, `--wifi` needs `sudo ufw allow 7900/tcp` (the link) and `sudo ufw allow 5353/udp` (Bonjour), and `--web-host 0.0.0.0` needs the web port, best limited to your LAN: `sudo ufw allow from 192.168.1.0/24 to any port 8765 proto tcp`. Without `--web-host` the page is only reachable from the laptop itself and needs no rule.
-5. **GPU.** The NVIDIA GPU is not used: PyAV decodes HEVC and MediaPipe's Python package runs the hand model on the CPU. One 720p stream at 24-30 fps should be well within a laptop CPU; the page's signal chain shows whether decoding or tracking falls behind.
-6. Viewing from another device: start with `--web-host 0.0.0.0` and open the printed `WEB_URL` (with its key) on that device.
+Everything else in this README applies unchanged: the page, recordings, calibration, Wi-Fi pairing, the virtual camera's canvas and controls. `python` below means `~/.venvs/glassesdata-receiver/bin/python`, run from this `Receiver/` folder.
+
+### Install
+
+Put the repository on the laptop (a `git clone`, outside any synced folder), then run as yourself, not with sudo:
+
+```sh
+Receiver/scripts/setup_ubuntu.sh          # asks before every sudo step; --yes answers yes, --help lists the options
+```
+
+It is idempotent (run it again at any time; it only does what is missing) and prints every command before running it:
+
+1. checks the system (Ubuntu 24.04, x86_64, Secure Boot state; it refuses to run as root);
+2. installs with apt what is missing: `python3-venv python3-dev usbmuxd libimobiledevice-utils libgl1 libglib2.0-0t64`, and `ffmpeg` if you want it (`ffplay` to look at the virtual camera, `ffprobe` for recordings);
+3. creates `~/.venvs/glassesdata-receiver` with Ubuntu's Python 3.12 and installs `requirements-dev.txt` and `pyvirtualcam`, pinned to the versions the tests passed with on macOS (`--latest` for the newest allowed). Every one of them has a manylinux x86_64 wheel usable by CPython 3.12 (checked on PyPI: av 18.1.0 and cryptography 50.0.2 as `cp311-abi3`, opencv-contrib-python 5.1.0.95 as `cp37-abi3`, mediapipe 1.2.3 as `py3-none-manylinux_2_28`, numpy 2.4.6, zeroconf 0.154.0 and pyvirtualcam 0.15.0 as `cp312`; qrcode, ifaddr and pytest are pure Python), so nothing is compiled; then it downloads the hand model;
+4. optionally sets up the virtual camera (below);
+5. checks the iPhone's pairing if one is plugged in, and offers `idevicepair pair`;
+6. if `ufw` is on, offers to open the Wi-Fi ports;
+7. runs `python -m glassesdata_receiver --help` and the test suite (`--no-tests` skips it). The tests have so far only run on Python 3.11 on macOS, so this is their first run on 3.12 and on Linux.
+
+By hand, the same without the virtual camera:
+
+```sh
+sudo apt install python3-venv python3-dev usbmuxd libimobiledevice-utils
+python3 -m venv ~/.venvs/glassesdata-receiver
+~/.venvs/glassesdata-receiver/bin/pip install -r requirements-dev.txt pyvirtualcam
+```
+
+`scripts/check_linux.sh` is the read-only diagnosis (no sudo): Python packages, folders, usbmuxd and the socket, the iPhone on the bus and its pairing, recent usbmuxd crashes, the v4l2loopback module, its signer and devices, who has the camera device open, ports 8765 and 7900, the firewall. Each problem line says what to do; it exits with 1 when something fails.
+
+The NVIDIA GPU is not used: PyAV decodes HEVC and MediaPipe's Python package runs the hand model on the CPU. One 720p stream at 24-30 fps is light for a laptop CPU; the page's signal chain shows whether decoding or tracking falls behind.
+
+### USB
+
+```sh
+python -m glassesdata_receiver --usb --open
+```
+
+- **usbmuxd** comes from the `usbmuxd` package. udev starts it when an iPhone is plugged in and stops it when the last one is unplugged, so before that the page says to plug the iPhone in. Its socket is `/var/run/usbmuxd`, the same path as on macOS, and usbmuxd makes it world-writable (`chmod(..., 0666)` in its `main.c`), so no group membership is needed.
+- **Trust, once.** Plug in the iPhone and unlock it. Linux usbmuxd asks the phone itself to show "Trust This Computer?"; tap Trust and enter the passcode. usbmuxd keeps the pairing record in `/var/lib/lockdown`. Check with `idevice_id -l` (lists the iPhone's UDID) and `idevicepair validate` ("SUCCESS: Validated pairing"). If the prompt was missed or dismissed: unlock the phone and run `idevicepair pair`, tap Trust, run it again.
+- **Does the link need that pairing?** usbmuxd itself does not ask for it: its `Connect` only looks the device up and sends a TCP SYN to the app's port (`device_start_connect` in usbmuxd's `src/device.c`), and an iPhone that was never paired is listed anyway (`src/preflight.c`, "make device visible anyways"); libusbmuxd's `iproxy(1)` asks for pairing only for network connections. Whether iOS accepts a connection to an app's port from a computer it has never trusted is not documented by Apple and has not been tried here. So trust the computer once in any case. When the app's port refuses the connection and usbmuxd has no pairing record for the phone (asked over the socket with `ReadPairRecord`, no root needed), the page says "this computer is not trusted yet" instead of "open GlassesData".
+- The page's USB line tells the cases apart: usbmuxd not installed; the iPhone on the USB bus but usbmuxd not running (`sudo systemctl restart usbmuxd`); no iPhone; not trusted yet; the app's Computer link off.
+
+### Wi-Fi
+
+As on macOS: `python -m glassesdata_receiver --wifi --pair` once, then `--wifi`. The identity (`cert.pem`, `key.pem`, `pairing.json`, mode 0600 in a 0700 folder) lives in `~/.local/state/glassesdata` (`$XDG_STATE_HOME`).
+
+- **Bonjour.** The receiver advertises `_glassesdata._tcp` with its own responder (python-zeroconf). It binds UDP 5353 with address reuse, as Ubuntu's `avahi-daemon` does, so both run side by side; nothing needs to be stopped (expected, not yet seen on the laptop). The pairing code also carries the addresses, so the phone finds the computer without Bonjour too.
+- **Firewall.** Ubuntu's `ufw` is off by default. If it is on (`sudo ufw status`): `sudo ufw allow 7900/tcp` (the link) and `sudo ufw allow 5353/udp` (Bonjour). With `--web-host 0.0.0.0` also the web port, best limited to your LAN: `sudo ufw allow from 192.168.1.0/24 to any port 8765 proto tcp`. USB mode and the page on `127.0.0.1` need no rule.
+- **Networks that isolate clients** (eduroam and many campus or hotel networks) do not let the phone reach the laptop at all. Use USB, or a hotspot or home network.
+- Viewing from another device: start with `--web-host 0.0.0.0` and open the printed `WEB_URL` (with its key) there.
+
+### Virtual camera
+
+pyvirtualcam writes to a v4l2loopback device: a video device that apps read like a webcam. The receiver's is `/dev/video10`, labelled **GlassesData**.
+
+1. **The module.** Ubuntu's own kernels ship it, built and signed by Canonical, so Secure Boot accepts it as it is: for the 6.8, 6.11, 6.14 and 6.17 kernels of 24.04 it is `/lib/modules/<version>/kernel/v4l2loopback/v4l2loopback.ko.zst` in the kernel's `linux-modules-<version>` package; the newest 7.0 kernels moved it to `linux-main-modules-v4l2loopback-<version>` (`sudo apt install linux-main-modules-v4l2loopback-$(uname -r)`). `modinfo v4l2loopback` shows whether this kernel has it and who signed it. (Seen in Ubuntu's package index in November 2026.)
+2. **Only for a kernel without it**: build it with DKMS, `sudo apt install v4l2loopback-dkms v4l2loopback-utils`. With Secure Boot on, a DKMS module is signed with this computer's own key (MOK), which the firmware must trust once, otherwise `modprobe` says `Key was rejected by service`. The installer may ask for a one-time password to enrol the key at the next reboot; if it did not, or that was skipped: `sudo mokutil --import /var/lib/shim-signed/mok/MOK.der` (choose a one-time password), reboot, and in the blue "Perform MOK management" screen choose Enroll MOK > Continue > Yes, type the password, Reboot. `mokutil --test-key /var/lib/shim-signed/mok/MOK.der` then says "is already enrolled".
+3. **Load it:**
+
+   ```sh
+   sudo modprobe v4l2loopback devices=1 video_nr=10 card_label="GlassesData" exclusive_caps=1
+   ```
+
+   `video_nr=10` keeps it clear of the built-in webcam's numbers, `card_label` is the name apps list, and `exclusive_caps=1` makes the device announce itself as a capture device once something writes to it, which Chrome (Meet) and Zoom need to list it.
+4. **At every start** (what `setup_ubuntu.sh` writes): `/etc/modules-load.d/glassesdata-v4l2loopback.conf` containing `v4l2loopback`, and `/etc/modprobe.d/glassesdata-v4l2loopback.conf` containing `options v4l2loopback devices=1 video_nr=10 card_label=GlassesData exclusive_caps=1`.
+5. **Start it**: `python -m glassesdata_receiver --usb --virtual-camera` (or `V` on the page), and choose **GlassesData** in Zoom, Meet or Teams; `ffplay /dev/video10` shows it too. `--virtual-camera-device /dev/videoN` picks another v4l2loopback device; without it the receiver takes the one labelled GlassesData, else the first one.
+
+The page's Virtual camera panel shows the device it writes to (or would write to, with the v4l2loopback devices found as its tooltip) and, when there is none, the steps above. Pixel format: the receiver hands pyvirtualcam BGR frames; pyvirtualcam converts them with libyuv to I420 and sets the device to `V4L2_PIX_FMT_YUV420`, the format WebRTC (Chrome, Meet), Zoom, OBS and ffmpeg read. A desktop login may write to `/dev/video*` (systemd gives the logged-in user access); over SSH add yourself to the `video` group (`sudo usermod -aG video $USER`, log in again).
+
+**OBS for Linux** can show the same device as a source (Sources > Video Capture Device (V4L2) > GlassesData). OBS's own Start Virtual Camera also writes to a v4l2loopback device (it loads the module itself when it is not loaded). Only one program can write to a device at a time, so to use both, give each its own: `sudo modprobe -r v4l2loopback && sudo modprobe v4l2loopback devices=2 video_nr=10,11 card_label=GlassesData,OBS exclusive_caps=1,1` (and the same `options` line in the modprobe.d file).
+
+### Troubleshooting
+
+Run `scripts/check_linux.sh` first; it covers most of this.
+
+| Symptom | What to do |
+|---|---|
+| USB: "usbmuxd is not installed" | `sudo apt install usbmuxd libimobiledevice-utils` |
+| USB: "plug in the iPhone" although it is plugged in | Another cable or port (a charge-only cable does not work); `lsusb` should list an Apple device; unlock the phone |
+| USB: "the iPhone is plugged in but usbmuxd is not running" | `sudo systemctl restart usbmuxd`; `journalctl -u usbmuxd -n 30` says why it stopped |
+| The iPhone connects and disconnects every few seconds, `journalctl -u usbmuxd` shows `status=11/SEGV` | A known crash of usbmuxd 1.1.1 on Ubuntu 24.04 with newer iPhones (libimobiledevice/usbmuxd issue #246, open); a USB-A to USB-C cable was reported to avoid it |
+| USB: "this computer is not trusted yet" | Unlock the phone, tap Trust; or `idevicepair pair`. If the phone never asks: Settings > General > Transfer or Reset iPhone > Reset > Reset Location & Privacy, then plug in again |
+| USB: "iPhone found - open GlassesData and turn on Computer link (USB)" | The phone is trusted but the app is not listening: open it and turn the link on |
+| Virtual camera: "the v4l2loopback module is not loaded" | `sudo modprobe v4l2loopback devices=1 video_nr=10 card_label=GlassesData exclusive_caps=1`, or run `setup_ubuntu.sh` |
+| `modprobe: ERROR: could not insert 'v4l2loopback': Key was rejected by service` | A DKMS module under Secure Boot: enrol its key (Virtual camera, step 2), or use Ubuntu's signed module |
+| Virtual camera: "missing permissions" | `sudo usermod -aG video $USER`, log out and in |
+| Virtual camera: "already in use", "busy" | Another program writes to the device (OBS's virtual camera): stop it, or `devices=2` as above |
+| Zoom or Meet does not list GlassesData | The module needs `exclusive_caps=1`; reload it with that, then restart the app (apps list cameras when they start) |
+| `--open` does nothing | No graphical session (SSH), or run as root: open the printed `WEB_URL` yourself |
+| `import cv2` fails with `libGL.so.1` or `libgthread` | `sudo apt install libgl1 libglib2.0-0t64` (a minimal install) |
+| Recordings are not in `~/Videos` | They follow the desktop's Videos folder (its name in the session's language); `--out DIR` sets another one |
+| A long recording stops when the laptop goes to sleep | Ubuntu suspends an idle laptop on battery after 15 minutes. Plug it in, or start the receiver under `systemd-inhibit --what=sleep:idle --why="GlassesData" ~/.venvs/glassesdata-receiver/bin/python -m glassesdata_receiver ...` |
+| Closing the terminal | The receiver stops cleanly on SIGHUP (the recording is closed), as on Ctrl-C. To keep it running, start it under `nohup` or in `tmux` |

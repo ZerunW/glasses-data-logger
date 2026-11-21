@@ -1,7 +1,9 @@
-# GlassesData receiver, Python 3.11. Lower bounds are the versions it was tested with.
+# GlassesData receiver: Python 3.11 (macOS) or 3.12 (Ubuntu 24.04's own). Lower bounds are the
+# versions it was tested with; scripts/setup_ubuntu.sh installs exactly these. Each of them (and
+# pyvirtualcam 0.15.0) has a manylinux x86_64 wheel that CPython 3.12 can use (checked on PyPI).
 #
-# Optional: pyvirtualcam>=0.15 for --virtual-camera (also needs OBS). Not installed by default;
-# without it everything else works.
+# Optional: pyvirtualcam>=0.15 for --virtual-camera (also needs OBS on macOS, v4l2loopback on Linux).
+# Not installed by default; without it everything else works.
 av>=18.1.0
 cryptography>=50.0.2
 ifaddr>=0.2.0

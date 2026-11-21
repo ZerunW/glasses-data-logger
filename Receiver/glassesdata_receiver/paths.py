@@ -40,11 +40,45 @@ def cache_dir() -> Path:
     return _xdg("XDG_CACHE_HOME", ".cache") / XDG_APP
 
 
+def _xdg_user_dir(name: str, fallback: str) -> Path:
+    """A folder from ``user-dirs.dirs`` (xdg-user-dirs), such as XDG_VIDEOS_DIR.
+
+    Desktops write that file in the session's language, so the Videos folder may be called
+    ``Vidéos`` or ``视频``. The file holds shell-style lines, ``XDG_VIDEOS_DIR="$HOME/Videos"``,
+    with paths either absolute or relative to ``$HOME``. A missing file or entry, or an entry
+    that is the home folder itself (the specification's way to turn a folder off), gives
+    ``~/<fallback>``.
+    """
+    home = Path.home()
+    config = _xdg("XDG_CONFIG_HOME", ".config") / "user-dirs.dirs"
+    try:
+        lines = config.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeDecodeError):
+        lines = []
+    key = f"XDG_{name}_DIR="
+    for line in lines:
+        line = line.strip()
+        if not line.startswith(key):
+            continue
+        value = line[len(key):].strip()
+        if len(value) >= 2 and value[0] == value[-1] == '"':
+            value = value[1:-1]
+        if value.startswith("$HOME"):
+            folder = home / value[len("$HOME"):].lstrip("/")
+        elif value.startswith("/"):
+            folder = Path(value)
+        else:
+            continue
+        if folder != home:
+            return folder
+    return home / fallback
+
+
 def recordings_dir() -> Path:
-    """Default folder for recordings."""
+    """Default folder for recordings: ~/Movies/GlassesData on macOS, the Videos folder on Linux."""
     if _is_macos():
         return Path.home() / "Movies" / APP
-    return Path.home() / "Videos" / APP
+    return _xdg_user_dir("VIDEOS", "Videos") / APP
 
 
 # Files in the state folder that every new recording gets a copy of (PIPELINE.md sections 3 and 4).

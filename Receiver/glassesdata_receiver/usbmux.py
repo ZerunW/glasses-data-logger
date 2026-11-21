@@ -197,6 +197,36 @@ def _result_code(reply: dict, operation: str) -> int:
     return reply["Number"]
 
 
+ENOENT = 2  # libimobiledevice's usbmuxd answers ReadPairRecord with this errno when it has no record
+
+
+def has_pair_record(
+    serial: str,
+    socket_path: str = DEFAULT_SOCKET,
+    timeout: float = 2.0,
+) -> bool | None:
+    """Whether usbmuxd holds a pairing record for this device (it was trusted once).
+
+    True: a record exists. False: usbmuxd says there is none (the iPhone's "Trust This
+    Computer" was never accepted). None: unknown (an error, or an answer this code does
+    not recognise). Asks usbmuxd over its socket (``ReadPairRecord``), so it needs no
+    access to ``/var/lib/lockdown``, which only usbmuxd's own user can read on Linux.
+    """
+    if not serial:
+        return None
+    try:
+        with _open_socket(socket_path, timeout) as sock:
+            _send_request(sock, _request("ReadPairRecord", PairRecordID=serial))
+            reply = _read_reply(sock)
+    except UsbmuxError:
+        return None
+    if isinstance(reply.get("PairRecordData"), bytes):
+        return True
+    if reply.get("MessageType") == "Result" and reply.get("Number") == ENOENT:
+        return False
+    return None
+
+
 def connect(
     device_id: int,
     port: int,

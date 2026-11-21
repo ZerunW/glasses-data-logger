@@ -18,14 +18,21 @@ latest frame. Without video it sends a calm placeholder card instead of a frozen
 Requires ``pip install pyvirtualcam`` (imported only when the camera starts). On macOS
 it also needs OBS (https://obsproject.com): macOS only lets a signed camera extension
 provide a system camera, and OBS ships one. On Linux pyvirtualcam writes to a
-v4l2loopback device instead (package ``v4l2loopback-dkms``).
+v4l2loopback device instead: Ubuntu's own kernels include the module (else the package
+``v4l2loopback-dkms``), loaded with ``LINUX_MODPROBE``. The receiver hands pyvirtualcam
+BGR frames; on Linux pyvirtualcam converts them (libyuv) to I420 and sets the device to
+V4L2_PIX_FMT_YUV420, the format browsers (WebRTC), Zoom and OBS read. Which device: the
+one given with ``--virtual-camera-device``, else the v4l2loopback device labelled
+"GlassesData", else the first v4l2loopback device pyvirtualcam finds.
 """
 
 from __future__ import annotations
 
+import functools
 import importlib.util
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -79,21 +86,30 @@ def parse_size(text: str) -> tuple[int, int]:
     return width, height
 
 
+LOOPBACK_LABEL = "GlassesData"  # card_label of the receiver's own v4l2loopback device
+LOOPBACK_NR = 10  # its video_nr: /dev/video10, clear of real webcams
+LINUX_MODPROBE = (
+    f"sudo modprobe v4l2loopback devices=1 video_nr={LOOPBACK_NR} card_label={LOOPBACK_LABEL} exclusive_caps=1"
+)
+AGAIN = "Then start the virtual camera here again."
+
+
 def setup_hint(platform: str | None = None) -> str:
     platform = platform or sys.platform
     if platform == "darwin":
         return (
             "Install OBS Studio (obsproject.com). Open it, click Start Virtual Camera once and allow the camera "
             "extension when macOS asks (System Settings > General > Login Items & Extensions > Camera Extensions), "
-            "then click Stop Virtual Camera and quit OBS. Then start the virtual camera here again."
+            "then click Stop Virtual Camera and quit OBS. " + AGAIN
         )
     if platform.startswith("linux"):
         return (
-            "Load v4l2loopback: sudo apt install v4l2loopback-dkms, then "
-            "sudo modprobe v4l2loopback devices=1 exclusive_caps=1 card_label=GlassesData. "
-            "Then start the virtual camera here again."
+            f"Load v4l2loopback: {LINUX_MODPROBE} (Receiver/scripts/setup_ubuntu.sh sets this up for every start). "
+            "If modprobe cannot find the module, install it: sudo apt install v4l2loopback-dkms. If modprobe says "
+            "\"Key was rejected by service\", Secure Boot refuses the module until its key is enrolled (README, "
+            "Ubuntu 24.04 > Virtual camera). " + AGAIN
         )
-    return "Install OBS Studio (obsproject.com) and start its virtual camera once. Then start the virtual camera here again."
+    return "Install OBS Studio (obsproject.com) and start its virtual camera once. " + AGAIN
 
 
 INSTALL_HINT = (
@@ -102,18 +118,182 @@ INSTALL_HINT = (
 )
 
 
-def open_pyvirtualcam(width: int, height: int, fps: int) -> Any:
-    """The real camera: pyvirtualcam, imported here and only here. Raises ``Unavailable``."""
+def open_pyvirtualcam(width: int, height: int, fps: int, device: str | None = None) -> Any:
+    """The real camera: pyvirtualcam, imported here and only here. Raises ``Unavailable``.
+
+    ``device`` (Linux only, such as ``/dev/video10``) is ignored on other platforms."""
     try:
         import pyvirtualcam
     except ImportError:
         raise Unavailable("pyvirtualcam is not installed", INSTALL_HINT) from None
+    linux = sys.platform.startswith("linux")
+    if linux:
+        device = choose_loopback_device(device)  # raises Unavailable with the steps when there is none
+    extra = {"device": device} if linux and device else {}
     try:
-        return pyvirtualcam.Camera(width=width, height=height, fps=fps, fmt=pyvirtualcam.PixelFormat.BGR)
+        # BGR in; on Linux pyvirtualcam writes I420 (V4L2_PIX_FMT_YUV420) to the device.
+        return pyvirtualcam.Camera(width=width, height=height, fps=fps, fmt=pyvirtualcam.PixelFormat.BGR, **extra)
     except Exception as error:
         # pyvirtualcam lists one line per backend it tried; keep them, without the quotes.
         detail = " ".join(str(error).split()).replace("'", "")
-        raise Unavailable(f"the virtual camera device could not be opened ({detail})", setup_hint()) from error
+        hint = loopback_open_hint(detail, device) if linux else setup_hint()
+        raise Unavailable(f"the virtual camera device could not be opened ({detail})", hint) from error
+
+
+# ---------------------------------------------------------------- Linux: v4l2loopback devices
+
+V4L2_SYSFS = "/sys/devices/virtual/video4linux"  # devices without a parent bus, as v4l2loopback's are
+V4L2LOOPBACK_MODULE = "/sys/module/v4l2loopback"
+_LOOPBACK_ATTRIBUTES = ("max_openers", "buffers", "format")  # sysfs files only v4l2loopback devices have
+MODULES_ROOT = "/lib/modules"
+SECURE_BOOT_VARIABLE = "/sys/firmware/efi/efivars/SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c"
+MOK_KEY = "/var/lib/shim-signed/mok/MOK.der"  # where Ubuntu's DKMS keeps the key it signs modules with
+
+
+@dataclass(frozen=True)
+class LoopbackDevice:
+    path: str  # /dev/video10
+    label: str  # the card_label apps show, such as "GlassesData"
+
+
+@dataclass(frozen=True)
+class LoopbackState:
+    module_loaded: bool
+    devices: tuple[LoopbackDevice, ...]
+
+    def find(self, path: str) -> LoopbackDevice | None:
+        real = os.path.realpath(path)
+        return next((device for device in self.devices if os.path.realpath(device.path) == real or device.path == path), None)
+
+    def listed(self) -> str:
+        return ", ".join(f"{device.path} ({device.label})" if device.label else device.path for device in self.devices)
+
+
+def loopback_state(sysfs: str | None = None, module: str | None = None) -> LoopbackState:
+    """The v4l2loopback devices on this computer, read from sysfs (nothing is opened)."""
+    sysfs = sysfs or V4L2_SYSFS
+    module = module or V4L2LOOPBACK_MODULE
+    devices = []
+    try:
+        names = os.listdir(sysfs)
+    except OSError:
+        names = []
+    for name in names:
+        if not re.fullmatch(r"video\d+", name):
+            continue
+        folder = os.path.join(sysfs, name)
+        if not any(os.path.exists(os.path.join(folder, attribute)) for attribute in _LOOPBACK_ATTRIBUTES):
+            continue
+        try:
+            with open(os.path.join(folder, "name"), encoding="utf-8", errors="replace") as handle:
+                label = handle.read().strip()
+        except OSError:
+            label = ""
+        devices.append(LoopbackDevice(f"/dev/{name}", label))
+    devices.sort(key=lambda device: int(device.path[len("/dev/video"):]))
+    return LoopbackState(os.path.isdir(module), tuple(devices))
+
+
+def loopback_module_installed(release: str | None = None, modules_root: str | None = None) -> bool | None:
+    """Whether this kernel has a v4l2loopback module (Ubuntu's own, or one built by DKMS); None if unknown."""
+    release = release or os.uname().release
+    modules_root = modules_root or MODULES_ROOT
+    try:
+        with open(os.path.join(modules_root, release, "modules.dep"), encoding="utf-8", errors="replace") as handle:
+            text = handle.read()
+    except OSError:
+        return None
+    return re.search(r"(^|/)v4l2loopback\.ko", text, re.MULTILINE) is not None
+
+
+def secure_boot_enabled(variable: str | None = None) -> bool | None:
+    """UEFI Secure Boot on (True), off (False) or unknown (None: no EFI variables, as on a BIOS boot)."""
+    variable = variable or SECURE_BOOT_VARIABLE
+    try:
+        with open(variable, "rb") as handle:
+            data = handle.read()
+    except OSError:
+        return None
+    return bool(data[-1]) if len(data) >= 5 else None  # 4 bytes of attributes, then the value
+
+
+def loopback_setup_hint(
+    state: LoopbackState | None = None, installed: bool | None = None, secure_boot: bool | None = None
+) -> str:
+    """What to do when no v4l2loopback device can be used, in words (Linux)."""
+    if state is not None and state.module_loaded and not state.devices:
+        return (
+            "The v4l2loopback module is loaded but has no device. Load it again with one: "
+            f"sudo modprobe -r v4l2loopback && {LINUX_MODPROBE}. " + AGAIN
+        )
+    if installed is False:
+        return (
+            "This kernel has no v4l2loopback module. Ubuntu's kernels ship a signed one, for the newest ones as a "
+            "separate package: sudo apt install linux-main-modules-v4l2loopback-$(uname -r). If there is no such "
+            "package (another kernel), install the DKMS build: sudo apt install v4l2loopback-dkms (with Secure Boot "
+            f"on, enrol its key when asked: README, Ubuntu 24.04 > Virtual camera). Then {LINUX_MODPROBE}. " + AGAIN
+        )
+    hint = f"Load v4l2loopback: {LINUX_MODPROBE} (Receiver/scripts/setup_ubuntu.sh sets this up for every start)."
+    if secure_boot:
+        hint += (
+            " Secure Boot is on: if modprobe says \"Key was rejected by service\", the module was built by DKMS and "
+            f"its key is not enrolled yet: sudo mokutil --import {MOK_KEY}, reboot, choose Enroll MOK."
+        )
+    elif installed is None:
+        hint += " If modprobe cannot find the module, install it: sudo apt install v4l2loopback-dkms."
+    return hint + " " + AGAIN
+
+
+def choose_loopback_device(wanted: str | None, state: LoopbackState | None = None) -> str | None:
+    """The device to open on Linux: ``wanted`` if it is a v4l2loopback device, else the one labelled
+    "GlassesData", else None (pyvirtualcam takes the first it finds). Raises ``Unavailable`` with
+    the steps when the module is not loaded or ``wanted`` cannot be the device."""
+    state = state if state is not None else loopback_state()
+    if not state.module_loaded and not state.devices:
+        raise Unavailable(
+            "no v4l2loopback device: the v4l2loopback module is not loaded",
+            loopback_setup_hint(state, loopback_module_installed(), secure_boot_enabled()),
+        )
+    if wanted:
+        if state.find(wanted) is not None:
+            return wanted
+        others = f"The v4l2loopback devices are: {state.listed()}." if state.devices else ""
+        if not os.path.exists(wanted):
+            raise Unavailable(
+                f"{wanted} does not exist",
+                (others + " " if others else "") + f"Pass one of them with --virtual-camera-device, or load the module "
+                f"with that number (video_nr=...): sudo modprobe -r v4l2loopback && {LINUX_MODPROBE}. " + AGAIN,
+            )
+        if state.devices:
+            raise Unavailable(
+                f"{wanted} is not a v4l2loopback device (it may be a real webcam)",
+                f"{others} Pass one of them with --virtual-camera-device. " + AGAIN,
+            )
+        return wanted  # sysfs shows none: let pyvirtualcam check the driver itself
+    labelled = [device for device in state.devices if device.label == LOOPBACK_LABEL]
+    return labelled[0].path if labelled else None
+
+
+def loopback_open_hint(detail: str, device: str | None) -> str:
+    """What to do when pyvirtualcam could not open a v4l2loopback device, from its error text."""
+    text = detail.lower()
+    name = device or "the device"
+    if "permission" in text:
+        return (
+            f"Your user may not write to {name}. Add it to the video group: sudo usermod -aG video $USER, "
+            "then log out and in again (a desktop session normally has access already). " + AGAIN
+        )
+    if "in use" in text or "busy" in text or "format" in text:
+        return (
+            f"Another program is probably writing to {name} (OBS's Start Virtual Camera?). Stop it, or give each "
+            "its own device: sudo modprobe -r v4l2loopback && sudo modprobe v4l2loopback devices=2 "
+            f"video_nr={LOOPBACK_NR},{LOOPBACK_NR + 1} card_label={LOOPBACK_LABEL},OBS exclusive_caps=1,1. " + AGAIN
+        )
+    if "no v4l2 loopback device" in text:
+        return loopback_setup_hint(loopback_state())
+    if "not a v4l2" in text or "not a video output" in text:
+        return f"{name} is not a v4l2loopback device. Pass a v4l2loopback device with --virtual-camera-device. " + AGAIN
+    return setup_hint("linux")
 
 
 # ---------------------------------------------------------------- composition
@@ -391,6 +571,7 @@ class VirtualCamera:
         open_camera: Callable[[int, int, int], Any] | None = None,
         watch_stderr: bool | None = None,
         clock: Callable[[], float] = time.monotonic,
+        device: str | None = None,
     ) -> None:
         if tuple(size) not in CANVAS_SIZES:
             raise ValueError(f"unsupported canvas size {size}")
@@ -399,8 +580,10 @@ class VirtualCamera:
         self._receiver = receiver
         self.size: tuple[int, int] = (int(size[0]), int(size[1]))
         self.fps = int(fps)
-        self._open_camera = open_camera or open_pyvirtualcam
+        self.requested_device = device or None  # --virtual-camera-device (Linux)
+        self._open_camera = open_camera or functools.partial(open_pyvirtualcam, device=self.requested_device)
         self._uses_pyvirtualcam = open_camera is None
+        self._loopback_cache: tuple[float, LoopbackState] | None = None
         self._watch_stderr = watch_stderr
         self._clock = clock
         self._lock = threading.Lock()
@@ -414,6 +597,7 @@ class VirtualCamera:
         self._stop = threading.Event()
         self._closed = False  # set by close(): the receiver is shutting down, no more starts
         self._device: str | None = None
+        self._device_label: str | None = None
         self._backend: str | None = None
         self._frames_sent = 0
         self._last_error: str | None = None
@@ -451,8 +635,9 @@ class VirtualCamera:
                 return self._failed(f"the virtual camera could not be opened ({error})", setup_hint())
             device = str(getattr(camera, "device", "") or "virtual camera")
             backend = str(getattr(camera, "backend", "") or "")
+            label = self._label_of(device, backend)
             with self._lock:
-                self._device, self._backend = device, backend
+                self._device, self._backend, self._device_label = device, backend, label
                 self._frames_sent = 0
                 self._last_error = self._hint = None
                 self._check = None
@@ -475,11 +660,12 @@ class VirtualCamera:
             mode, position = self._mode, self._position
             detail = f"{mode}" + (f", band at {position:.2f}" if mode == "fill" else "")
             log.info(
-                "Virtual camera self-check: opened %r (backend %s); sending %dx%d at %d fps, %s. "
-                "The sender cannot confirm that an app receives the frames: open the camera in an app to check.",
-                device, backend or "unknown", width, height, self.fps, detail,
+                "Virtual camera self-check: opened %r%s (backend %s); sending %dx%d at %d fps, %s. "
+                "The sender cannot confirm that an app receives the frames: open the camera in an app to check%s.",
+                device, f", labelled {label!r}" if label else "", backend or "unknown", width, height, self.fps, detail,
+                f" (choose {label!r} there, or run: ffplay {device})" if backend == "v4l2loopback" else "",
             )
-            return True, f"Virtual camera on: {device}"
+            return True, f"Virtual camera on: {device}" + (f" ({label})" if label else "")
 
     def stop(self) -> tuple[bool, str]:
         with self._control:
@@ -519,12 +705,21 @@ class VirtualCamera:
             self._settings_version += 1
 
     def status(self) -> dict[str, Any]:
+        loopback = self._loopback_status()
         with self._lock:
             running = self.running
+            hint = None
+            if not running:
+                hint = self._hint
+                if hint is None and loopback is not None and not loopback["devices"]:
+                    hint = loopback_setup_hint(LoopbackState(loopback["module_loaded"], ()))
             return {
                 "available": self._available,
                 "running": running,
                 "device": self._device,
+                "device_label": self._device_label,
+                "requested_device": self.requested_device,
+                "loopback": loopback,
                 "backend": self._backend,
                 "width": self.size[0],
                 "height": self.size[1],
@@ -536,7 +731,7 @@ class VirtualCamera:
                 "showing": self._showing if running else None,
                 "check": self._check,
                 "last_error": self._last_error,
-                "hint": self._hint if not running else None,
+                "hint": hint,
             }
 
     def preview_jpeg(self) -> bytes | None:
@@ -565,6 +760,7 @@ class VirtualCamera:
         interval = 1.0 / self.fps
         next_at = self._clock()
         check_until = next_at + SELF_CHECK_S
+        loopback_check = watch is None and self._backend == "v4l2loopback"
         state = _PictureState()
         try:
             while not stop.is_set():
@@ -579,6 +775,9 @@ class VirtualCamera:
                 if watch is not None and self._clock() >= check_until:
                     self._finish_check(watch)
                     watch = None
+                if loopback_check and self._clock() >= check_until:
+                    self._finish_loopback_check()
+                    loopback_check = False
                 next_at += interval
                 delay = next_at - self._clock()
                 if delay < -interval:  # fell behind (a slow send): carry on from now, never burst
@@ -649,11 +848,40 @@ class VirtualCamera:
         except (ImportError, ValueError):
             return False
 
+    def _loopback_status(self) -> dict[str, Any] | None:
+        """Linux with pyvirtualcam: the module and its devices (read at most every 2 s), else None."""
+        if not (self._uses_pyvirtualcam and sys.platform.startswith("linux")):
+            return None
+        now = self._clock()
+        cached = self._loopback_cache
+        if cached is None or now - cached[0] > 2.0:
+            cached = self._loopback_cache = (now, loopback_state())
+        state = cached[1]
+        return {
+            "module_loaded": state.module_loaded,
+            "devices": [{"path": device.path, "label": device.label} for device in state.devices],
+        }
+
+    def _label_of(self, device: str, backend: str) -> str | None:
+        if backend != "v4l2loopback":
+            return None
+        found = loopback_state().find(device)
+        return (found.label or None) if found is not None else None
+
+    def _finish_loopback_check(self) -> None:
+        width, height = self.size
+        with self._lock:
+            sent = self._frames_sent
+        text = f"v4l2loopback took {sent} frames of {width}x{height} (as I420) in {SELF_CHECK_S:g} s without an error"
+        log.info("Virtual camera self-check: %s (delivery to an app cannot be confirmed from here)", text)
+        with self._lock:
+            self._check = text
+
     def _failed(self, message: str, hint: str) -> tuple[bool, str]:
         with self._lock:
             self._last_error = message
             self._hint = hint
-            self._device = self._backend = None  # not the device of an earlier run
+            self._device = self._backend = self._device_label = None  # not the device of an earlier run
             self._frames_sent = 0
         log.error("Virtual camera unavailable: %s. %s", message, hint)
         return False, f"Virtual camera unavailable: {message}"
