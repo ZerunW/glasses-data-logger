@@ -66,7 +66,9 @@ https://mano.is.tue.mpg.de, which you download yourself after registering).
 
 `train REC` (package `rl/`) trains a floating robot hand with PPO (rsl_rl) to reproduce the
 object's motion: `--backend mujoco` (CPU) or `warp` (MuJoCo Warp, GPU), `--play` rolls out a
-checkpoint. `view REC` opens the Rerun file; `eval-charuco REC` evaluates against the on-screen
+checkpoint. It refuses a world that is not gravity-aligned (no IMU gravity) unless
+`--allow-unaligned`; `physics` then reports `inconclusive`. Episodes start only where the hand and
+object were observed and end at gaps longer than `train.max_gap_s`. `view REC` opens the Rerun file; `eval-charuco REC` evaluates against the on-screen
 ChArUco board. Methods and parameters: each step module's docstring and `configs/<section>.toml`.
 
 IMU: the app writes the Meta SDK's motion sources (`glasses`, `neuralBand` = a wrist IMU,

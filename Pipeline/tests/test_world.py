@@ -118,3 +118,24 @@ def test_hand_gaps_and_outliers(world_rec):
     assert np.all(np.isnan(left[26:38]))
     assert not out["observed"][6, 0] and out["filled"][6, 0]
     assert np.linalg.norm(left[6] - Jg[6, 0], axis=-1).mean() < 0.03
+
+
+def test_hand_seen_in_a_single_frame_is_kept(world_rec, tmp_path):
+    dst = tmp_path / "rec"
+    shutil.copytree(world_rec, dst)
+    ep = Episode(dst)
+    h3 = ep.load_npz("hand3d")
+    meta = h3.pop("meta")
+    valid = np.asarray(h3["valid"]).copy()
+    f = int(np.flatnonzero(valid[:, 0])[len(np.flatnonzero(valid[:, 0])) // 2])
+    valid[:, 0] = False
+    valid[f, 0] = True  # the left hand is seen once
+    joints = np.asarray(h3["joints_cam"]).copy()
+    joints[~valid] = np.nan
+    ep.save_npz("hand3d", meta, **{**h3, "valid": valid, "joints_cam": joints})
+    cam = world.camera_trajectory(ep)
+    out = world.hands_world(ep, cam["T_world_cam"], cam["valid"], world.params(ep.config))
+    assert np.allclose(out["joints"][f, 0], out["raw"][f, 0]) and np.isfinite(out["joints"][f, 0]).all()
+    assert out["observed"][f, 0] and out["observed"][:, 0].sum() == 1 and not out["filled"][:, 0].any()
+    assert out["quality"]["left"]["single_frame"] is True
+    assert np.isfinite(out["joints"][:, 1]).any()  # the right hand is smoothed as before

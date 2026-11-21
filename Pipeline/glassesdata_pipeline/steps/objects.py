@@ -31,8 +31,14 @@ hand tracking, and the supporting table, ready for MuJoCo (PIPELINE.md section 5
    a detected episode (or co-motion outside episodes). ``fitness`` is the per-frame fraction of
    observed points within ``max_correspondence_m`` of the posed model.
 
+``poses.npz`` also has ``pose_source[T]`` int8 (0 measured, 1 assumed_static, 2 hand_motion,
+3 interpolated; names in ``pose_source_names``; see :func:`track_object`), so poses assumed
+before the grasp can be told from measured ones. The shape is fused only from frames before the
+first grasp onset (:func:`fusion_frames`); an object with fewer than 3 such frames fails with
+that reason.
+
 Extra output (not in the section-5 table): ``objects/grasps.json`` (detected and rejected grasp
-episodes, all prompts).
+episodes, all prompts, failed objects with the reason).
 """
 
 from __future__ import annotations
@@ -58,7 +64,7 @@ from ..errors import PipelineError
 from ..groundtruth import unpack_mask
 
 NAME = "objects"
-VERSION = 2  # 2: near-surface test past the grasping hand, no table penetration while grasped
+VERSION = 3  # 2: near-surface test past the grasping hand, no table penetration while grasped; 3: pose_source
 REQUIRES = ["hands2d", "depth", "hand3d", "world"]
 OUTPUTS = ["objects/index.json", "objects/table.json"]
 CONFIG_SECTIONS = ["objects", "synth"]
@@ -105,6 +111,10 @@ class Inputs:
     @property
     def shape(self) -> tuple[int, int]:
         return int(self.depth.shape[1]), int(self.depth.shape[2])
+
+    def first_frame_after(self, f: int, seconds: float) -> int:
+        """The first frame at or after ``t[f] - seconds`` (real timestamps, not a frame count)."""
+        return int(np.searchsorted(self.t, self.t[f] - seconds - 1e-6, side="left"))
 
     def has(self, f: int) -> bool:
         return f in self.row and bool(self.cam_valid[f]) and math.isfinite(float(self.scale[f]))
@@ -313,11 +323,10 @@ def _near_surface_fn(inp: Inputs, near_m: float, lookback_s: float = 0.6, min_fr
     least occluded frame in ``[onset - lookback_s, onset]`` (the object is still static there): the
     one with the most non-hand depth pixels in the window. None (unknown, not a rejection) when even
     that frame has fewer than ``min_free_frac`` of the window free."""
-    lookback = max(2, int(round(lookback_s * inp.fps)))
-
     def near(hand: int, frame: int, point: np.ndarray) -> bool | None:
         best: tuple[int, int, bool] | None = None  # (free pixels, frame, decision); ties: nearest the onset
-        for f in range(frame, frame - lookback - 1, -1):
+        start = min(inp.first_frame_after(frame, lookback_s), max(0, frame - 2)) if 0 <= frame < inp.T else frame
+        for f in range(frame, start - 1, -1):
             if not (0 <= f < inp.T and inp.has(f)):
                 continue
             X = geo.transform(geo.inv_T(inp.T_wc[f]), point)
@@ -352,9 +361,9 @@ def grasp_prompt(inp: Inputs, episode: dict[str, Any], gcfg: Any) -> dict[str, A
     point = np.asarray(episode["point"], dtype=np.float64)
     hand = int(episode["hand"])
     onset = int(episode["onset"])
-    lookback = int(round(float(gcfg.get("lookback_s", 0.6)) * inp.fps))
+    start = inp.first_frame_after(onset, float(gcfg.get("lookback_s", 0.6)))
     best = None
-    for f in range(max(0, onset - lookback), onset + 1):
+    for f in range(start, onset + 1):
         if not inp.has(f):
             continue
         T_cw = geo.inv_T(inp.T_wc[f])
@@ -557,15 +566,24 @@ def merge_prompts(prompts: list[dict[str, Any]], masks: list[dict[str, Any] | No
 
 
 def fusion_frames(inp: Inputs, masks: MaskSet, episodes: list[dict[str, Any]], fcfg: Any) -> list[int]:
+    """Frames whose masked depth is fused: the object must be static there, so only frames before
+    its first grasp onset (``margin_s`` before it when that leaves at least 3). Raises
+    :class:`PipelineError` (the object is left out, with the reason in ``grasps.json``) when fewer
+    than 3 masked frames precede the onset: frames after it are never fused, because the object
+    moves with the hand there."""
     first_onset = min((int(e["onset"]) for e in episodes), default=inp.T)
-    margin = int(round(float(fcfg.get("margin_s", 0.25)) * inp.fps))
     have = [f for f in masks.frames if inp.has(f)]
-    frames = [f for f in have if f <= first_onset - margin]
+    if first_onset < inp.T:
+        cut = inp.t[first_onset] - float(fcfg.get("margin_s", 0.25)) + 1e-6
+        frames = [f for f in have if f < first_onset and inp.t[f] <= cut]
+    else:
+        frames = list(have)
     if len(frames) < 3:
         frames = [f for f in have if f < first_onset]
     if len(frames) < 3:
-        log.warning("objects: fewer than 3 frames before the first grasp; fusing the first frames anyway")
-        frames = have[: max(3, int(fcfg.get("max_frames", 120)))]
+        raise PipelineError(f"only {len(frames)} frame(s) with a mask and depth before the first grasp (onset frame "
+                            f"{first_onset}); the shape is fused only from frames where the object is static "
+                            "(it is grasped too early in the clip)")
     n_max = int(fcfg.get("max_frames", 120))
     if len(frames) > n_max:
         frames = [frames[i] for i in np.linspace(0, len(frames) - 1, n_max).round().astype(int)]
@@ -809,12 +827,22 @@ def lift_above_table(T: np.ndarray, vertices: np.ndarray, table: dict[str, Any])
     return out, -low
 
 
+POSE_SOURCES = ("measured", "assumed_static", "hand_motion", "interpolated")
+MEASURED, ASSUMED_STATIC, HAND_MOTION, INTERPOLATED = range(4)
+
+
 def track_object(inp: Inputs, tracker: Tracker, T0: np.ndarray, episodes: list[dict[str, Any]], tcfg: Any,
-                 table: dict[str, Any], vertices: np.ndarray) -> dict[str, Any]:
-    """Poses ``T_world_obj[T]`` (see the module docstring), ``valid``, ``fitness`` and statistics."""
+                 table: dict[str, Any], vertices: np.ndarray, fused_frames: Any = ()) -> dict[str, Any]:
+    """Poses ``T_world_obj[T]`` (see the module docstring), ``valid``, ``fitness``, ``pose_source``
+    (:data:`POSE_SOURCES`: ``measured`` = the frame's own depth points defined the pose (a fused
+    frame, or a static frame of an accepted ICP), ``assumed_static`` = a static pose held without
+    the frame's own points, ``hand_motion`` = moved with the grasping hand, ``interpolated`` = inside
+    a grasp where the hand is missing) and statistics."""
     T = inp.T
     poses = np.repeat(T0[None], T, axis=0)
     valid = np.zeros(T, dtype=bool)
+    source = np.full(T, ASSUMED_STATIC, dtype=np.int8)
+    fused = {int(f) for f in fused_frames}
     stats: dict[str, Any] = {"segments": []}
     segments: list[list[int]] = []
     for e in sorted(episodes, key=lambda e: int(e["onset"])):
@@ -841,6 +869,8 @@ def track_object(inp: Inputs, tracker: Tracker, T0: np.ndarray, episodes: list[d
         if first:
             poses[a:b + 1] = T0
             valid[a:b + 1] = True
+            for f in range(a, b + 1):
+                source[f] = MEASURED if f in fused else ASSUMED_STATIC
             stats["segments"].append({"kind": "static", "frames": [a, b], "mode": "fused model"})
             return
         frames = list(range(a, b + 1))
@@ -853,6 +883,8 @@ def track_object(inp: Inputs, tracker: Tracker, T0: np.ndarray, episodes: list[d
             cur = cur @ geo.inv_T(res["C"])
             cur, snapped = rest_on_table(cur, vertices, table, snap_tilt) if snap_tilt > 0 else (cur, False)
             info["mode"] = "stacked icp" + (" + rest on table" if snapped else "")
+            for f in frames:
+                source[f] = MEASURED if len(tracker.observe(f)) else ASSUMED_STATIC
         else:
             info["mode"] = "hold"
         poses[a:b + 1] = cur
@@ -869,6 +901,7 @@ def track_object(inp: Inputs, tracker: Tracker, T0: np.ndarray, episodes: list[d
         info: dict[str, Any] = {"kind": "grasp", "frames": [a, b], "hand": "left" if hand == 0 else "right"}
         if okH.sum() < 2:
             poses[a:b + 1] = cur
+            source[a:b + 1] = INTERPOLATED
             info["mode"] = "hold (no hand)"
             stats["segments"].append(info)
             seg_start = b + 1
@@ -896,6 +929,7 @@ def track_object(inp: Inputs, tracker: Tracker, T0: np.ndarray, episodes: list[d
             if f >= a:
                 poses[f] = sm[i]
                 valid[f] = bool(okH[i])
+                source[f] = HAND_MOTION if okH[i] else INTERPOLATED
                 if no_penetration:
                     poses[f], lift = lift_above_table(poses[f], vertices, table)
                     lifts.append(lift)
@@ -907,7 +941,7 @@ def track_object(inp: Inputs, tracker: Tracker, T0: np.ndarray, episodes: list[d
         seg_start = b + 1
     static_segment(seg_start, T - 1, seg_start == 0)
     fitness = np.array([tracker.fitness(f, poses[f]) for f in range(T)])
-    return {"T_world_obj": poses, "valid": valid, "fitness": fitness, "stats": stats}
+    return {"T_world_obj": poses, "valid": valid, "fitness": fitness, "pose_source": source, "stats": stats}
 
 
 # =============================================================================================
@@ -952,11 +986,12 @@ def _object(ep: Episode, cfg: Any, inp: Inputs, group: dict[str, Any], oid: str,
     mass, com, inertia = hl.mesh_inertia(V_obj, F, density)
     model_pts, model_nrm = hl.sample_surface(V_obj, F, int(fcfg.get("model_points", 3000)), seed=k)
     tracker = Tracker(inp, masks, model_pts, model_nrm, tcfg, erode_px)
-    tr = track_object(inp, tracker, T0, obj_eps, tcfg, table, V_obj)
+    tr = track_object(inp, tracker, T0, obj_eps, tcfg, table, V_obj, fused_frames=frames)
     # grasped from contact
     tip = gr.fingertip_distances(inp.joints, tr["T_world_obj"], KNN(model_pts))
-    obj_speed = gr.speed(tr["T_world_obj"][:, :3, 3], inp.fps, 3)
-    wrist = np.stack([gr.speed(gr.gaussian_smooth(inp.joints[:, h, 0], 0.06 * inp.fps), inp.fps, 3) for h in range(2)], axis=1)
+    obj_speed = gr.speed(tr["T_world_obj"][:, :3, 3], inp.fps, 3, inp.t)
+    wrist = np.stack([gr.speed(gr.gaussian_smooth(inp.joints[:, h, 0], 0.06 * inp.fps), inp.fps, 3, inp.t)
+                      for h in range(2)], axis=1)
     grasped = gr.contact_grasped(tip, obj_eps, obj_speed, wrist, float(tcfg.get("contact_m", 0.035)),
                                  float(tcfg.get("min_contact_frac", 0.3)), float(tcfg.get("co_motion_mps", 0.05)))
     # ---- write
@@ -970,7 +1005,8 @@ def _object(ep: Episode, cfg: Any, inp: Inputs, group: dict[str, Any], oid: str,
     for j, (pv, pf) in enumerate(parts):
         hl.write_obj(folder / "collision" / f"part_{j}.obj", pv, pf, f"{oid}: convex collision part {j} ({collision_backend})")
     ep.save_npz(f"objects/{oid}/poses", meta, T_world_obj=tr["T_world_obj"], valid=tr["valid"],
-                fitness=tr["fitness"], grasped=grasped)
+                fitness=tr["fitness"], grasped=grasped, pose_source=tr["pose_source"],
+                pose_source_names=np.array(POSE_SOURCES))
     extent = hl.mesh_extents(V_obj)
     props = {
         "volume_m3": float(mass / density), "mass_kg": float(mass), "com": com.tolist(),
@@ -1010,7 +1046,7 @@ def run(ep: Episode, cfg: Any) -> dict[str, Any]:
     prompts: list[dict[str, Any]] = []
     if bool(ocfg.get("auto_prompts", True)):
         near = _near_surface_fn(inp, float(gcfg.get("near_surface_m", 0.08)), float(gcfg.get("lookback_s", 0.6)))
-        episodes, rejected = gr.detect_grasps(inp.joints, inp.fps, gcfg, near)
+        episodes, rejected = gr.detect_grasps(inp.joints, inp.fps, gcfg, near, t=inp.t)
         for e in episodes:
             pr = grasp_prompt(inp, e, gcfg)
             if pr is None:

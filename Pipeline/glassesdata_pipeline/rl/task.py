@@ -6,6 +6,11 @@ Everything here is written against an array module ``xp`` (numpy or torch). The 
 simulator; this module decides what the state, the targets, the rewards and the resets are.
 The unit tests drive :class:`TrackingTask` with numpy and a fake backend.
 
+Gaps in the demonstration (``reference.observed`` / ``long_gap``): episodes start only at observed
+steps (:func:`start_candidates`), an episode ends as a time-out when it reaches a step inside a
+gap longer than ``train.max_gap_s``, and the tracking reward terms are zero on unobserved steps
+(the reference there is interpolated, not measured).
+
 Time convention: the environment is at demo control step ``idx`` (``0 .. T-1`` of the resampled
 reference). An action is applied as a residual on the reference at ``idx + 1``; after
 ``decimation`` physics steps the index advances to ``idx + 1`` and rewards / termination compare
@@ -230,6 +235,36 @@ def sample_start_steps(xp: Any, u: Any, u_zero: Any, num_steps: int, min_episode
     return xp.where(u_zero < p_start_at_zero, idx * 0, idx)
 
 
+def start_candidates(observed: Any, long_gap: Any, num_steps: int, min_episode_steps: int) -> np.ndarray:
+    """Allowed start steps (numpy, increasing): observed steps outside long gaps, preferably with
+    at least ``min_episode_steps`` steps before the next long gap or the demo end; falls back to
+    any observed step at or before :func:`max_start_step`, then any observed step, then ``[0]``."""
+    T = int(num_steps)
+    obs = np.ones(T, bool) if observed is None else np.asarray(observed, dtype=bool).reshape(T)
+    gap = np.zeros(T, bool) if long_gap is None else np.asarray(long_gap, dtype=bool).reshape(T)
+    allowed = obs & ~gap
+    stop = np.full(T, T - 1)  # the next step that ends an episode (a long-gap step or the demo end)
+    nxt = T - 1
+    for k in range(T - 1, -1, -1):
+        if gap[k]:
+            nxt = k
+        stop[k] = nxt
+    for cand in (allowed & (stop - np.arange(T) >= min_episode_steps),
+                 allowed & (np.arange(T) <= max_start_step(T, min_episode_steps)), allowed):
+        if cand.any():
+            return np.nonzero(cand)[0].astype(np.int64)
+    return np.zeros(1, dtype=np.int64)
+
+
+def sample_from_candidates(xp: Any, u: Any, u_zero: Any, candidates: Any, p_start_at_zero: float) -> Any:
+    """Start steps ``(n,)``: uniform over ``candidates`` (an index array on the device) using
+    uniforms ``u``; with probability ``p_start_at_zero`` (``u_zero``) the first candidate."""
+    n = int(candidates.shape[0])
+    k = xm.clip(xp, xm.to_int(xp, xp.floor(u * n)), 0, n - 1)
+    k = xp.where(u_zero < p_start_at_zero, k * 0, k)
+    return candidates[k]
+
+
 def offset_indices(xp: Any, idx: Any, offset: int, num_steps: int) -> Any:
     """``clamp(idx + offset, 0, T - 1)``."""
     return xm.clip(xp, idx + offset, 0, num_steps - 1)
@@ -312,12 +347,21 @@ def termination(xp: Any, obj_pos_err: Any, obj_rot_err: Any, obj_z: Any, table_z
     return done, reasons
 
 
-def time_outs(xp: Any, idx: Any, ep_steps: Any, num_steps: int, max_episode_steps: int) -> Any:
-    """Truncation: the demo end is reached, or the episode is ``max_episode_steps`` long (> 0)."""
+def time_outs(xp: Any, idx: Any, ep_steps: Any, num_steps: int, max_episode_steps: int, stop: Any = None) -> Any:
+    """Truncation: the demo end is reached, the episode is ``max_episode_steps`` long (> 0), or
+    (``stop``, a ``(T,)`` boolean array) the step is inside a long gap of the demonstration."""
     out = idx >= num_steps - 1
     if max_episode_steps > 0:
         out = out | (ep_steps >= max_episode_steps)
+    if stop is not None:
+        out = out | stop[idx]
     return out
+
+
+def mask_tracking_terms(terms: dict[str, Any], observed: Any) -> dict[str, Any]:
+    """Tracking reward terms times ``observed`` (0/1 per world): no reward for matching an
+    interpolated reference; penalties are unchanged."""
+    return {key: (value * observed if key in REWARD_TERMS else value) for key, value in terms.items()}
 
 
 # =============================================================================================
@@ -379,6 +423,11 @@ class TrackingTask:
         }
         self.ref["finger_q"] = self.ref["hand_q"][:, i(m.finger_q_cols)]
         self.origin = f(ref.obj_pos[0])
+        long_gap = np.zeros(self.T, bool) if getattr(ref, "long_gap", None) is None else np.asarray(ref.long_gap, bool)
+        observed = np.ones(self.T, bool) if getattr(ref, "observed", None) is None else np.asarray(ref.observed, bool)
+        self.observed_w = f(observed.astype(np.float64))  # (T,) 1 = measured reference, 0 = interpolated
+        self.stop = xp.as_tensor(long_gap, device=device) if torch_ else long_gap  # (T,) bool
+        self.start_cands = i(start_candidates(observed, long_gap, self.T, cfg.min_episode_steps))
         # model arrays
         self.qpos0 = f(m.qpos0)
         self.hand_qadr, self.hand_vadr = i(m.hand_qadr), i(m.hand_vadr)
@@ -431,8 +480,8 @@ class TrackingTask:
         if k == 0:
             return
         if start is None:
-            start = sample_start_steps(xp, self.rng.uniform((k,)), self.rng.uniform((k,)), self.T,
-                                       cfg.min_episode_steps, cfg.p_start_at_zero)
+            start = sample_from_candidates(xp, self.rng.uniform((k,)), self.rng.uniform((k,)), self.start_cands,
+                                           cfg.p_start_at_zero)
         r = self.ref
         hand_q = r["hand_q"][start]
         obj_pos, obj_quat = r["obj_pos"][start], r["obj_quat"][start]
@@ -460,6 +509,7 @@ class TrackingTask:
         self.idx[env_ids] = start
         self.ep_steps[env_ids] = 0
         self.prev_action[env_ids] = 0.0
+        self.state = {}  # the simulator state changed: the next observations() reads it again
 
     # ------------------------------------------------------------------ state, observations
 
@@ -527,10 +577,11 @@ class TrackingTask:
         r = self._ref_at(0)
         errors = rew_mod.tracking_errors(xp, s, r)
         terms = rew_mod.reward_terms(xp, s, r, errors, a, self.prev_action, cfg.reward)
+        terms = mask_tracking_terms(terms, self.observed_w[self.idx])
         terminated, reasons = termination(xp, errors["obj_pos"], errors["obj_rot"], s["obj_pos"][:, 2],
                                           float(self.model.table_z), errors["base_pos"], s["finite"],
                                           self.ep_steps, cfg.termination)
-        truncated = time_outs(xp, self.idx, self.ep_steps, self.T, cfg.max_episode_steps) & ~terminated
+        truncated = time_outs(xp, self.idx, self.ep_steps, self.T, cfg.max_episode_steps, self.stop) & ~terminated
         reward = rew_mod.total_reward(xp, terms, terminated, cfg.reward.weights)
         reward = xm.nan_to_zero(xp, reward)
 

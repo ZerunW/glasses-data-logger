@@ -149,9 +149,12 @@ def test_termination_and_timeouts():
 # =============================================================================================
 
 
-def make_task(n=8, follow=True, lift=0.1, **cfg_over):
+def make_task(n=8, follow=True, lift=0.1, observed=None, long_gap=None, **cfg_over):
     tm = task_model()
     ref = make_reference(tm, lift=lift)
+    if observed is not None:
+        ref.observed = observed
+    ref.long_gap = long_gap
     sim = FakeSim(tm, n, ref, follow=follow)
     cfg = T.parse_task_config(cfg_over)
     task = T.TrackingTask(np, sim, tm, ref, cfg, seed=0)
@@ -251,3 +254,86 @@ def test_play_mode_keeps_final_state():
         if term[0] or trunc[0]:
             break
     assert trunc[0] and task.idx[0] == ref.num_steps - 1 and len(sim.resets) == 1
+
+
+# =============================================================================================
+# gaps in the demonstration (reference.observed / long_gap)
+# =============================================================================================
+
+
+def test_start_candidates_avoid_gaps():
+    obs = np.ones(60, bool)
+    obs[10:13] = False  # short gap
+    gap = np.zeros(60, bool)
+    gap[30:40] = True  # long gap
+    obs[30:40] = False
+    c = T.start_candidates(obs, gap, 60, 10)
+    assert not np.isin(c, np.r_[10:13, 30:40]).any()
+    assert c.max() <= 49 and not np.isin(c, np.r_[21:30]).any()  # >= 10 steps before the gap / the end
+    assert 0 in c and 40 in c
+    # nothing satisfies the preferred rule: fall back to observed steps, then to [0]
+    np.testing.assert_array_equal(T.start_candidates(np.r_[False, True, False], None, 3, 10), [1])
+    np.testing.assert_array_equal(T.start_candidates(np.zeros(5, bool), None, 5, 1), [0])
+    u = np.linspace(0, 0.999, 500)
+    idx = T.sample_from_candidates(np, u, np.ones(500), c, 0.1)
+    assert set(idx.tolist()) == set(c.tolist())
+    assert (T.sample_from_candidates(np, u, np.zeros(500), c, 0.1) == c[0]).all()
+    stop = np.zeros(10, bool)
+    stop[4] = True
+    np.testing.assert_array_equal(T.time_outs(np, np.array([3, 4, 9]), np.array([1, 1, 1]), 10, 0, stop),
+                                  [False, True, True])
+
+
+def test_gaps_end_episodes_and_mask_tracking_rewards():
+    obs = np.ones(60, bool)
+    obs[10:13] = False  # interpolated, short
+    obs[30:40] = False  # a long gap
+    gap = np.zeros(60, bool)
+    gap[30:40] = True
+    task, sim, tm, ref = make_task(n=4, observed=obs, long_gap=gap, p_start_at_zero=1.0, noise={
+        k: 0.0 for k in ("finger_qpos", "base_pos", "base_rot", "obj_pos_xy", "obj_pos_z", "obj_rot")})
+    assert (task.idx == 0).all()
+    zero = np.zeros((4, task.num_actions))
+    w = task.cfg.reward.weights
+    best = w["obj_pos"] + w["obj_rot"] + w["hand_qpos"] + w["base_pos"] + w["base_rot"]
+    for k in range(29):
+        _, _, r, term, trunc, info = task.step(zero)
+        step = k + 1
+        assert not term.any()
+        if step < 29:
+            assert not trunc.any()
+        if step in (10, 11, 12):  # unobserved: no tracking reward, only penalties
+            assert all(np.all(info["terms"][key] == 0) for key in T.REWARD_TERMS)
+            assert (r <= 1e-9).all()
+        elif step < 29:
+            assert r.min() > best - 1e-6
+    _, _, r, term, trunc, info = task.step(zero)  # reaches step 30, inside the long gap
+    assert trunc.all() and not term.any()  # a time-out, not a failure
+    assert not np.isin(task.idx, np.r_[10:13, 30:40]).any()  # reset to observed steps only
+
+
+def test_reset_clears_the_cached_state():
+    task, sim, tm, ref = make_task(n=2)
+    task.step(np.zeros((2, task.num_actions)))
+    assert task.state
+    task.reset(task.all_ids, start=np.array([5, 7]), noise=False)
+    assert task.state == {}
+    policy, _ = task.observations()
+    task._read()
+    np.testing.assert_allclose(policy, task.observations()[0])
+    np.testing.assert_allclose(task.state["obj_pos"], ref.obj_pos[[5, 7]])
+
+
+def test_joint_limit_clipping_recomputes_hand_velocities():
+    from glassesdata_pipeline.rl.reference import hand_qvel_from_qpos
+    from glassesdata_pipeline.rl.scene_adapter import apply_joint_limits
+
+    tm = task_model()
+    ref = make_reference(tm)
+    ref.hand_qpos[:, 7] *= 3.0  # up to 2.4 rad: beyond the 1.5 rad limit
+    ref.hand_qvel = hand_qvel_from_qpos(ref.hand_qpos, ref.dt, tm.hand_joints, len(tm.hand_vadr))
+    violation = apply_joint_limits(ref, tm)
+    assert violation == pytest.approx(0.9)
+    assert ref.hand_qpos[:, 7].max() == pytest.approx(1.5)
+    np.testing.assert_allclose(ref.hand_qvel, hand_qvel_from_qpos(ref.hand_qpos, ref.dt, tm.hand_joints, len(tm.hand_vadr)))
+    assert ref.hand_qvel[-1, 6] == 0.0  # at the limit the joint does not move

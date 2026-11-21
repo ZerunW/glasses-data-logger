@@ -25,6 +25,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import os
@@ -46,6 +47,9 @@ MODEL_URL = (
     "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task"
 )
 MODEL_NAME = "hand_landmarker.task"
+# SHA-256 of hand_landmarker.task (float16, 7 819 105 bytes) as served at MODEL_URL in November 2026
+# (the receiver's cached copy). A download with another hash is refused (hands2d.model_sha256).
+MODEL_SHA256 = "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
 NO_DOWNLOAD_ENV = "GLASSESDATA_NO_DOWNLOAD"
 LEFT, RIGHT = 0, 1
 # slot_source codes stored in hands2d.npz
@@ -70,8 +74,10 @@ def default_model_path() -> Path:
     return cache_dir() / MODEL_NAME
 
 
-def resolve_model(model_path: str | os.PathLike[str] | None = None, allow_download: bool = True) -> Path:
-    """The model file to use; downloads it to the cache when missing and allowed."""
+def resolve_model(model_path: str | os.PathLike[str] | None = None, allow_download: bool = True,
+                  sha256: str | None = MODEL_SHA256) -> Path:
+    """The model file to use; downloads it to the cache when missing and allowed. A download is
+    saved only when its SHA-256 equals ``sha256`` (``""`` / None: no check)."""
     if model_path:
         path = Path(model_path).expanduser()
         if not path.is_file():
@@ -89,6 +95,13 @@ def resolve_model(model_path: str | os.PathLike[str] | None = None, allow_downlo
     log.info("downloading the MediaPipe hand model to %s", path)
     with urllib.request.urlopen(MODEL_URL, timeout=60) as response:  # noqa: S310 - fixed https URL
         data = response.read()
+    digest = hashlib.sha256(data).hexdigest()
+    if sha256 and digest != str(sha256).strip().lower():
+        raise PipelineError(
+            f"the downloaded MediaPipe hand model ({MODEL_URL}, {len(data)} bytes) has SHA-256 {digest}, expected "
+            f"{sha256}; nothing was saved. If Google has published a new model, check it and set "
+            'hands2d.model_sha256 to the new value (or "" to skip the check)'
+        )
     with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as handle:
         handle.write(data)
     os.replace(handle.name, path)
@@ -312,7 +325,8 @@ def timestamps_ms(t: np.ndarray) -> np.ndarray:
 def hands2d(ep: Any, cfg: Mapping[str, Any]) -> dict[str, np.ndarray]:
     """The ``hands2d`` arrays for a recording (every frame of ``video.mp4``)."""
     hcfg = cfg.get("hands2d", {}) or {}
-    model = resolve_model(hcfg.get("model_path") or None, bool(hcfg.get("allow_download", True)))
+    model = resolve_model(hcfg.get("model_path") or None, bool(hcfg.get("allow_download", True)),
+                          str(hcfg.get("model_sha256", MODEL_SHA256)))
     timeline = ep.timeline()
     T = len(timeline["t"])
     camera = ep.camera()

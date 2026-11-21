@@ -27,7 +27,7 @@ The numpy helpers (:func:`choose_hands`, :func:`hold_invalid`, :func:`smooth_qpo
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -185,6 +185,27 @@ def _body_T(data: Any, ident: int) -> np.ndarray:
     return geo.make_T(np.array(data.xmat[ident]).reshape(3, 3), np.array(data.xpos[ident]))
 
 
+def iterate_keep_best(q_start: np.ndarray, err_start: float, step: Callable[[], tuple[np.ndarray, float]],
+                      max_iters: int, tol: float) -> tuple[np.ndarray, float, int]:
+    """Run ``step()`` (one IK iteration: returns the new ``(q, error)``) up to ``max_iters`` times,
+    stopping when an iteration improves the error by less than ``tol``. Returns the best ``q`` seen
+    (the start included), its error and the number of iterations: the last iterate of a
+    differential-IK loop can be worse than an earlier one (overshoot, a limit, an active
+    constraint switching)."""
+    best_q, best_e = np.array(q_start, dtype=np.float64, copy=True), float(err_start)
+    previous = np.inf
+    n = 0
+    for n in range(1, max(0, int(max_iters)) + 1):
+        q, e = step()
+        e = float(e)
+        if e < best_e:
+            best_q, best_e = np.array(q, dtype=np.float64, copy=True), e
+        if previous - e < tol:
+            break
+        previous = e
+    return best_q, best_e, n
+
+
 def retarget(composed: ComposedModel, robot: robots.HandRobot, joints_world: np.ndarray, valid: np.ndarray,
              bone_lengths: np.ndarray, cfg: Mapping[str, Any]) -> dict[str, Any]:
     """Solve the episode. ``joints_world`` ``(T, 2, 21, 3)``, ``valid`` ``(T, 2)``, ``bone_lengths``
@@ -284,15 +305,15 @@ def retarget(composed: ComposedModel, robot: robots.HandRobot, joints_world: np.
                 for joint, task in h.tasks[1:]:
                     task.set_target(mink.SE3.from_translation(tgt[joint]))
                     task_list.append(task)
-            previous = np.inf
-            for _ in range(max_iters):
+
+            def step() -> tuple[np.ndarray, float]:
                 velocity = mink.solve_ik(configuration, task_list, dt, solver, damping=damping, limits=limits)
                 configuration.integrate_inplace(velocity, dt)
-                e = float(np.mean([current_error(h) for h in active]))
-                if previous - e < tol:
-                    break
-                previous = e
-            q = configuration.q
+                return configuration.q.copy(), float(np.mean([current_error(h) for h in active]))
+
+            start_error = float(np.mean([current_error(h) for h in active]))
+            q, _, _ = iterate_keep_best(configuration.q.copy(), start_error, step, max_iters, tol)
+            configuration.update(q)
         qpos[f] = q
         for i, h in enumerate(hands):
             if valid[f, h.slot]:

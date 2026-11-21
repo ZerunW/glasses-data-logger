@@ -185,3 +185,22 @@ def test_fixed_extrinsic(imu_rec):
     res = imu.calibrate(ep, p)
     assert np.allclose(res["R_cam_imu"], ep.gt["R_cam_imu"], atol=1e-9)
     assert abs(res["time_offset_s"] - float(ep.gt["imu_time_offset_s"])) < 0.005
+
+
+def test_duplicate_imu_stamps_and_cancelling_gravity_estimates(monkeypatch):
+    # 12 rows but only 6 distinct stamps: not enough samples after removing duplicates
+    t = np.repeat(np.arange(6) * 0.01, 2)
+    tl = {"imu_t": t, "imu_is_glasses": np.ones(12, bool), "acc": np.tile([0, 0, 1.0], (12, 1)),
+          "gyro": np.zeros((12, 3))}
+    assert imu._select_samples(tl, imu.params({}))[0] is None
+    tl2 = {"imu_t": np.r_[np.arange(12) * 0.01, 0.12, 0.12], "imu_is_glasses": np.ones(14, bool),
+           "acc": np.tile([0, 0, 1.0], (14, 1)), "gyro": np.zeros((14, 3))}
+    samples, _ = imu._select_samples(tl2, imu.params({}))
+    assert samples is not None and len(samples["t"]) == 13 and np.all(np.diff(samples["t"]) > 0)
+    # forward and backward Mahony estimates pointing opposite ways: no NaN
+    down = np.tile([0.0, 0.0, -1.0], (5, 1))
+    calls = iter([down, -down[::-1]])
+    monkeypatch.setattr(imu.imf, "gravity_in_sensor", lambda _: next(calls))
+    monkeypatch.setattr(imu.imf, "mahony", lambda *a, **k: None)
+    g = imu._mahony_gravity(np.arange(5) * 0.01, np.zeros((5, 3)), np.zeros((5, 3)), imu.params({}))
+    assert np.all(np.isfinite(g)) and np.allclose(g, down)

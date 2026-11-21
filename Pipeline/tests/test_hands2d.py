@@ -142,3 +142,24 @@ def test_mediapipe_backend_on_synthetic_frames(recording_copy, monkeypatch):
     kp = d["kp"][found]
     assert np.all(np.isfinite(kp)) or kp.size == 0
     assert d["meta"]["backend"] == "mediapipe" and d["meta"]["model"].endswith("hand_landmarker.task")
+
+
+def test_model_download_is_hash_checked(tmp_path, monkeypatch):
+    import hashlib
+    import io
+
+    from glassesdata_pipeline.backends import mediapipe_hands as mh
+    from glassesdata_pipeline.errors import PipelineError
+
+    monkeypatch.delenv(mh.NO_DOWNLOAD_ENV, raising=False)
+    monkeypatch.setattr(mh, "cache_dir", lambda: tmp_path / "cache")
+    payload = b"not really a model"
+    monkeypatch.setattr(mh.urllib.request, "urlopen", lambda url, timeout=60: io.BytesIO(payload))
+    with pytest.raises(PipelineError, match="SHA-256"):
+        mh.resolve_model()  # the pinned hash of the real model
+    assert not (tmp_path / "cache" / mh.MODEL_NAME).exists() and not list((tmp_path / "cache").glob("tmp*"))
+    good = hashlib.sha256(payload).hexdigest()
+    path = mh.resolve_model(sha256=good.upper())
+    assert path.read_bytes() == payload
+    path.unlink()
+    assert mh.resolve_model(sha256="").read_bytes() == payload  # check disabled

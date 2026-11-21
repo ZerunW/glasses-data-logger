@@ -26,7 +26,8 @@ Package: `Pipeline/glassesdata_pipeline/` (Python 3.11+). Command line: `python 
 - Units: metres, radians, seconds. Raw timestamps are integer nanoseconds.
 - **Master clock**: the phone's monotonic clock (`phone_time_ns`). Video frames, IMU samples and
   inputs all carry it. Episode time `t = (phone_time_ns - t0_ns) * 1e-9`, where `t0_ns` is the
-  `phone_time_ns` of video frame 0.
+  `phone_time_ns` of video frame 0. `ingest` repairs frame times that are not strictly increasing
+  (from `pts_us`; recorded in the `timeline.npz` meta as `time_repair`, `repaired_frames`).
 - **Camera frame**: OpenCV (x right, y down, z forward). Pixel (u, v): pixel centres at integer
   coordinates, origin at the top-left pixel. Intrinsics refer to the decoded video frame as stored
   (720×1280 portrait for the glasses at `.high`); frames are never rotated.
@@ -143,16 +144,16 @@ output has the same object under the key `"meta"`. `inputs` maps each input file
 | | `objects/<id>/masks.npz` | `frames[F]`, `packed[F, ...]` (`np.packbits` of the flattened row-major bool mask at depth resolution; see `groundtruth.pack_mask`), `shape` |
 | | `objects/<id>/mesh.obj` | visual mesh in the object frame (origin at the centroid) |
 | | `objects/<id>/collision/part_*.obj` | convex parts (convex hull when decomposition is unavailable) |
-| | `objects/<id>/poses.npz` | `T_world_obj[T,4,4]`, `valid[T]`, `fitness[T]`, `grasped[T,2]` |
+| | `objects/<id>/poses.npz` | `T_world_obj[T,4,4]`, `valid[T]`, `fitness[T]`, `grasped[T,2]`, `pose_source[T]` int8 (0 measured, 1 assumed_static, 2 hand_motion, 3 interpolated) |
 | | `objects/<id>/props.json` | `volume_m3, mass_kg, com[3], friction` |
 | | `objects/table.json` | world frame: `normal[3]` (unit, pointing up), `offset` with `normal·x + offset = 0`, `top_z` (world z of the top surface at the polygon centre), `floor_z` (world z of the floor or null), `height_m` (top above the floor), `height_source` (`"floor_plane"` or `"default"`), `polygon[[x,y],...]`, `found` |
 | `scene` | `sim/scene.xml` (+ `sim/assets/`) | MuJoCo MJCF: world, table, objects (free joints), mocap human hand skeleton |
-| | `sim/scene.json` | what the scene holds and the names in it (head body and camera, table, `obj_<id>` bodies and `obj_<id>_free` joints, `hand_<side>_<joint>` / `arm_<side>_<point>` mocap bodies), object mass properties and initial poses, the replay's renderer and frame count |
+| | `sim/scene.json` | what the scene holds and the names in it (head body and camera, table, `obj_<id>` bodies and `obj_<id>_free` joints, `hand_<side>_<joint>` / `arm_<side>_<point>` mocap bodies), object mass properties and initial poses, the replay's renderer and frame count, `table.support` (`"measured"`, or `"inferred"`: without `table.json` a box under the objects' lowest resting bottom), `gravity_aligned` |
 | | `sim/replay.mp4` | side-by-side source video / kinematic replay (MuJoCo renderer, or a numpy wireframe without `mujoco`) |
 | | `sim/replay_sheet.png` | for a few frames (`scene.replay_sheet_frames`): the undistorted video with the sim overlaid, and the sim view alone |
 | `retarget` | `retarget_<robot>.npz` | `qpos[T,nq]`, `joint_names`, `err_m[T]`, `robot` (extras below) |
 | | `sim/robot_<robot>.xml` | the floating robot hands the `qpos` columns refer to (`mjcf.compose`, `base="free"`) |
-| `physics` | `physics.json` | per-object deviation of simulated vs reconstructed trajectory, plausibility score |
+| `physics` | `physics.json` | per-object deviation of simulated vs reconstructed trajectory, `plausibility` score and `status`: `"ok"`, or `"inconclusive (...)"` with `plausibility` null when the world is not gravity-aligned or no object was compared |
 | | `sim/physics_<robot>.xml` | scene + robot hands, base driven by a mocap body and a soft weld |
 | | `sim/physics_traj.npz` | `T_world_obj[T,K,4,4]` (simulated), `object_ids[K]`, `penetration_m[T]`, `t[T]` |
 | `viz` | `viz/viz.json` | what was written (figures, Rerun file or why it was skipped); carries the runner's `meta` |

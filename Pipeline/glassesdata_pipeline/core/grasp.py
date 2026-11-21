@@ -7,6 +7,8 @@ thumb-index aperture (joints 4 and 8) *closes* (drops by at least ``close_drop_m
 (``move_m`` within ``move_window_s``) while the aperture stays closed. The episode ends when the
 aperture re-opens past the middle between its closed and open values (``release_frac``), or when
 the hand is lost for longer than ``max_gap_s``. Rejected candidates are returned with the reason.
+With the frame timestamps ``t`` the speeds and the open / move / gap windows use the real times
+(dropped frames, variable frame rate); without them ``t = frame / fps``.
 
 :func:`contact_grasped` turns fingertip-to-surface distances into ``grasped[T, 2]``: two
 fingertips within ``contact_m`` of the object during a detected episode of that hand, or outside
@@ -93,15 +95,25 @@ def grasp_point(joints: Any, mode: str = "thumb_fingers") -> np.ndarray:
     raise ValueError(f"unknown grasp point mode {mode!r}")
 
 
-def speed(points: Any, fps: float, window_frames: int) -> np.ndarray:
-    """Central-difference speed ``|p(t+w) - p(t-w)| / (2w/fps)`` along axis 0 (one-sided at the ends)."""
+def speed(points: Any, fps: float, window_frames: int, t: Any = None) -> np.ndarray:
+    """Central-difference speed ``|p(i+w) - p(i-w)| / dt`` along axis 0 (one-sided at the ends),
+    ``dt`` from the timestamps ``t`` (seconds) when given, else ``2w / fps``. With ``t`` the
+    window is ``window_frames / fps`` seconds on each side, so dropped frames do not shorten it."""
     p = np.asarray(points, dtype=np.float64)
     n = len(p)
-    w = max(1, int(window_frames))
     i = np.arange(n)
-    a = np.clip(i - w, 0, n - 1)
-    b = np.clip(i + w, 0, n - 1)
-    dt = np.maximum(b - a, 1) / fps
+    if t is None:
+        w = max(1, int(window_frames))
+        a = np.clip(i - w, 0, n - 1)
+        b = np.clip(i + w, 0, n - 1)
+        dt = np.maximum(b - a, 1) / fps
+    else:
+        t = np.asarray(t, dtype=np.float64)
+        half = max(1, int(window_frames)) / fps
+        a = np.minimum(np.searchsorted(t, t - half - 1e-9, side="left"), np.maximum(i - 1, 0))
+        b = np.maximum(np.searchsorted(t, t + half + 1e-9, side="right") - 1, np.minimum(i + 1, n - 1))
+        with np.errstate(invalid="ignore"):
+            dt = np.where(t[b] - t[a] > 0, t[b] - t[a], np.nan)
     return np.linalg.norm(p[b] - p[a], axis=-1) / (dt if p.ndim == 2 else dt[:, None])
 
 
@@ -110,55 +122,62 @@ def detect_grasps(
     fps: float,
     params: Mapping[str, Any] | None = None,
     near_surface: Callable[[int, int, np.ndarray], bool | None] | None = None,
+    t: Any = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Grasp episodes ``[{"hand", "onset", "release", "point" (3,), "aperture_open",
     "aperture_closed", "speed_onset", "moved_m"}]`` (frames inclusive) and rejected candidates
     (same keys plus ``"reason"``). ``near_surface(hand, frame, point)`` returns True/False, or None
-    when it cannot tell (accepted)."""
+    when it cannot tell (accepted). ``t``: frame timestamps (seconds; default ``frame / fps``)
+    for the speeds and the open / move / gap windows; the smoothing and ``min_duration_s`` use
+    ``fps`` (the median rate)."""
     p = {**DEFAULTS, **dict(params or {})}
     J = gaussian_smooth(np.asarray(joints, dtype=np.float64), float(p["smooth_s"]) * fps)
     T = J.shape[0]
+    times = np.arange(T) / fps if t is None else np.asarray(t, dtype=np.float64)
+    eps = 1e-6
     ap = aperture(J)
     gp = grasp_point(J, str(p["point"]))
     wrist = J[:, :, 0, :]
-    win_open = max(1, int(round(float(p["open_window_s"]) * fps)))
-    win_move = max(1, int(round(float(p["move_window_s"]) * fps)))
-    max_gap = max(1, int(round(float(p["max_gap_s"]) * fps)))
+    open_s, move_s, gap_s = float(p["open_window_s"]), float(p["move_window_s"]), float(p["max_gap_s"])
     min_len = max(1, int(round(float(p["min_duration_s"]) * fps)))
+
+    def first_at(time: float) -> int:  # first frame at or after ``time``
+        return int(np.searchsorted(times, time - eps, side="left"))
+
+    def last_at(time: float) -> int:  # last frame at or before ``time``
+        return int(np.searchsorted(times, time + eps, side="right")) - 1
     episodes: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     for hand in range(J.shape[1]):
         a = ap[:, hand]
         spd = speed(np.where(np.isfinite(wrist[:, hand]), wrist[:, hand], np.nan), fps,
-                    int(round(float(p["speed_window_s"]) * fps)))
+                    int(round(float(p["speed_window_s"]) * fps)), times)
         t = 0
         while t < T:
             if not np.isfinite(a[t]):
                 t += 1
                 continue
-            past = a[max(0, t - win_open):t + 1]
+            past = a[first_at(times[t] - open_s):t + 1]
             a_open = float(np.nanmax(past))
             drop = a_open - a[t]
             if not (drop >= float(p["close_drop_m"]) and a[t] <= float(p["close_ratio"]) * a_open):
                 t += 1
                 continue
             # closing: onset where the aperture settles near its minimum in the next window
-            fut = a[t:min(T, t + win_open)]
+            fut = a[t:max(t + 1, min(T, first_at(times[t] + open_s)))]
             a_min = float(np.nanmin(fut))
             settle = a_min + float(p["settle_frac"]) * (a_open - a_min)
             onset = t + int(np.argmax(fut <= settle))
             closed = float(np.nanmedian(a[onset:min(T, onset + max(3, min_len))]))
             open_thr = closed + float(p["release_frac"]) * (a_open - closed)
             # release: aperture above open_thr for release_frames frames, or the hand lost
-            release, run, gap, last_ok = T - 1, 0, 0, onset
+            release, run, last_ok = T - 1, 0, onset
             for u in range(onset + 1, T):
                 if not np.isfinite(a[u]):
-                    gap += 1
-                    if gap > max_gap:
+                    if times[u] - times[last_ok] > gap_s + eps:
                         release = last_ok
                         break
                     continue
-                gap = 0
                 last_ok = u
                 if a[u] >= open_thr:
                     run += 1
@@ -174,7 +193,7 @@ def detect_grasps(
                 "point": gp[onset, hand].copy(), "aperture_open": a_open, "aperture_closed": closed,
                 "speed_onset": float(np.nanmedian(spd[max(0, onset - 2):onset + 3])),
             }
-            end = min(cand["release"], onset + win_move)
+            end = min(cand["release"], max(onset, last_at(times[onset] + move_s)))
             moved = np.linalg.norm(wrist[onset:end + 1, hand] - wrist[onset, hand], axis=-1)
             cand["moved_m"] = float(np.nanmax(moved)) if np.any(np.isfinite(moved)) else 0.0
             reason = None

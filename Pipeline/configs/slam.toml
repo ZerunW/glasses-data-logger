@@ -59,8 +59,10 @@ max_lost_frames = 12         # after this many lost frames start a new keyframe 
 
 # ---- backend "import" (MegaSaM / DROID-SLAM / MASt3R-SLAM trajectory, TUM format, camera-to-world)
 import_path = ""             # absolute, or relative to the recording folder
-import_time = "auto"         # "seconds" (episode seconds), "frames" (video frame indices) or "auto"
-import_time_offset_s = 0.0   # added to the stamps, in their unit (seconds, or frames when import_time = "frames")
+import_time = "auto"         # "seconds" (episode seconds) or "frames" (video frame indices): set it. "auto" decides
+                             # only when unambiguous (one integer stamp per frame -> frames; non-integers -> seconds)
+import_time_offset = 0.0     # added to the stamps, in their unit (seconds, or frames when import_time = "frames";
+                             # -1 for frames numbered from 1). Replaces import_time_offset_s (still read, deprecated)
 import_max_dt_s = 0.0        # nearest-stamp association tolerance (0 = half a frame)
 import_max_gap_s = 0.5       # interpolate frames between stamps at most this far apart (keyframe-only files)
 import_scale = "auto"        # number (multiplies translations) or "auto" = Sim(3) scale to the builtin trajectory

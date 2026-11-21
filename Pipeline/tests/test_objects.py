@@ -212,3 +212,35 @@ def test_lift_above_table():
     beside = geo.make_T(np.eye(3), [1.2, 0.0, -0.9])  # beyond the table edge: may go lower
     assert ob.lift_above_table(beside, V, table)[1] == 0.0
     assert ob.lift_above_table(T, V, {"found": False})[1] == 0.0
+
+
+def test_pose_source_and_fusion_frames(objects_run):
+    from glassesdata_pipeline.steps import objects as ob
+
+    ep, _ = objects_run
+    poses = ep.load_npz("objects/obj0/poses")
+    src = poses["pose_source"]
+    names = [str(n) for n in poses["pose_source_names"]]
+    assert names == list(ob.POSE_SOURCES) and src.dtype == np.int8 and src.shape == (ep.gt.n_frames,)
+    item = ep.load_json("objects/index.json")[0]
+    onset, release = item["grasps"][0]["onset"], item["grasps"][0]["release"]
+    assert set(src[onset:release + 1].tolist()) <= {ob.HAND_MOTION, ob.INTERPOLATED}
+    assert (src[onset:release + 1] == ob.HAND_MOTION).mean() > 0.8
+    before = src[:onset]
+    assert set(before.tolist()) <= {ob.MEASURED, ob.ASSUMED_STATIC} and (before == ob.MEASURED).any()
+    assert (src[release + 1:] != ob.HAND_MOTION).all()
+    fused = ep.load_json("objects/obj0/props.json")["fusion"]["frames_used"]
+    assert fused[1] < onset  # never a frame after the grasp onset
+
+    class Masks:
+        def __init__(self, frames):
+            self.frames = frames
+
+    inp = type("Inp", (), {"fps": 24.0, "T": 48, "t": np.arange(48) / 24.0, "has": lambda self, f: True})()
+    fcfg = {"margin_s": 0.25, "max_frames": 120}
+    assert ob.fusion_frames(inp, Masks(list(range(48))), [{"onset": 20}], fcfg) == list(range(15))
+    assert ob.fusion_frames(inp, Masks(list(range(48))), [{"onset": 5}], fcfg) == [0, 1, 2, 3, 4]
+    with pytest.raises(ob.PipelineError, match="before the first grasp"):
+        ob.fusion_frames(inp, Masks(list(range(48))), [{"onset": 2}], fcfg)
+    inp.t = np.r_[np.arange(10), np.arange(20, 58)] / 24.0  # frames 10-19 dropped: the margin is in seconds
+    assert ob.fusion_frames(inp, Masks(list(range(48))), [{"onset": 12}], fcfg) == list(range(10))

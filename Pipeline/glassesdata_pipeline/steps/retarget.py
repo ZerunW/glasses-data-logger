@@ -31,7 +31,7 @@ from ..sim import mjcf, robots
 from ..sim.retarget_mink import MINK_PIN, choose_hands, retarget
 
 NAME = "retarget"
-VERSION = 1
+VERSION = 2  # 2: the best IK iterate per frame
 REQUIRES = ["world"]
 INPUTS = ["derived/hands_world.npz", "derived/profile.json", "derived/timeline.npz"]
 DEFAULT_ROBOT = "shadow"

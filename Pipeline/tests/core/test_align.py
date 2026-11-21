@@ -275,6 +275,18 @@ def test_tum_round_trip_and_column_order(tmp_path) -> None:
     assert rotation_angle_deg(np.eye(3), p3[1, :3, :3]) == pytest.approx(90.0)
 
 
+def test_read_tum_rejects_bad_rows(tmp_path) -> None:
+    path = tmp_path / "bad.txt"
+    for body, message in (("1.0 0 0 0 0 0 0 1\n2.0 0 0 0 0 0 0 0\n", "bad.txt:2: zero-length quaternion"),
+                          ("# c\n1.0 0 0 nan 0 0 0 1\n", "bad.txt:2: non-finite"),
+                          ("1.0 0 0 0 0 0 0 1\n\n2.0 0 0 x 0 0 0 1\n", "bad.txt:3: not a number"),
+                          ("1.0 0 0 0 0 0 1\n", "bad.txt:1: expected 8 values"),
+                          ("1.0 0 0 0 0 0 0 inf\n", "bad.txt:1: non-finite")):
+        path.write_text(body)
+        with pytest.raises(ValueError, match=message):
+            read_tum(path)
+
+
 def test_associate_unequal_rates_one_to_one() -> None:
     t_a = np.arange(0.0, 2.0, 1 / 30)                       # 30 Hz
     t_b = np.arange(0.004, 2.0, 1 / 24)                     # 24 Hz, offset start

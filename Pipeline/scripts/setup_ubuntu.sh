@@ -21,7 +21,10 @@
 #
 # Environment: GLASSESDATA_PIPELINE_VENV (default ~/.venvs/glassesdata-pipeline),
 #              GLASSESDATA_PYTHON (default python3.12, Ubuntu 24.04's Python),
-#              GLASSESDATA_SRC (default ~/src: the MuJoCo Menagerie, WiLoR and HaMeR clones).
+#              GLASSESDATA_SRC (default ~/src: the MuJoCo Menagerie, WiLoR and HaMeR clones),
+#              GLASSESDATA_SAM2_REF, GLASSESDATA_MENAGERIE_REF, GLASSESDATA_WILOR_REF, GLASSESDATA_HAMER_REF
+#              (the git commit installed; default: the commits pinned below, checked in November 2026;
+#              a branch or tag name works too, e.g. GLASSESDATA_MENAGERIE_REF=main).
 #
 # Nothing is written into this repository. Written on a Mac and checked with bash -n only: the
 # first run on the Linux laptop is its test (then run scripts/omen_smoke.sh).
@@ -38,7 +41,13 @@ VENV_PY="$VENV/bin/python"
 MENAGERIE="$SRC/mujoco_menagerie"
 readonly VENV PYTHON SRC VENV_PY MENAGERIE
 readonly TORCH_INDEX=https://download.pytorch.org/whl
-readonly SAM2_GIT="git+https://github.com/facebookresearch/sam2.git"
+# Sources installed from git, pinned to commits (main of each repository on 2026-11-21).
+SAM2_REF=${GLASSESDATA_SAM2_REF:-2b90b9f5ceec907a1c18123530e92e794ad901a4}            # 2024-12-16
+MENAGERIE_REF=${GLASSESDATA_MENAGERIE_REF:-370c43965323c0944b433b202aac5058b5f907a9}  # 2026-11-10
+WILOR_REF=${GLASSESDATA_WILOR_REF:-fcb911312a38fa8badd30d9656a167485d61b8f9}          # 2026-04-07
+HAMER_REF=${GLASSESDATA_HAMER_REF:-3a01849f4148352e9260b69bf28b65d1671a4905}          # 2026-02-07
+readonly SAM2_REF MENAGERIE_REF WILOR_REF HAMER_REF
+readonly SAM2_GIT="git+https://github.com/facebookresearch/sam2.git@$SAM2_REF"
 # Model weights (Hugging Face hub ids; the backends use the same ids, see backends/depth_anything.py
 # and configs/objects.toml [objects.sam2]).
 readonly HF_MODELS=(
@@ -340,7 +349,7 @@ install_requirements() {
     if [[ $NO_SAM2 -eq 1 ]]; then
         info "SAM 2 skipped (--no-sam2): objects.mask_backend = \"sam2\" reports the missing package"
     elif "$VENV_PY" -c 'import sam2' >/dev/null 2>&1; then
-        ok "SAM 2 installed"
+        ok "SAM 2 installed (reinstall another commit: $VENV_PY -m pip uninstall sam2, then run this again)"
     else
         # Official package from the repository. SAM2_BUILD_CUDA=0: no nvcc needed (the optional
         # CUDA kernel only fills small holes in masks); --no-build-isolation: build against the
@@ -371,23 +380,50 @@ raise SystemExit(1 if bad else 0)
 EOF
 }
 
+# ------------------------------------------------------------------ git sources at a pinned commit
+
+# clone_at URL DIR REF [--recursive]: a shallow checkout of REF (commit, branch or tag) in DIR;
+# an existing clone at another commit is moved to REF after asking.
+clone_at() {
+    local url=$1 dir=$2 ref=$3 recursive=${4:-}
+    if [[ ! -d $dir/.git ]]; then
+        if [[ -e $dir ]]; then
+            warn "$dir exists but is not a git clone; move it away and run this again"
+            return 1
+        fi
+        run mkdir -p -- "$dir" || return 1
+        run git -C "$dir" init -q || return 1
+        run git -C "$dir" remote add origin "$url" || return 1
+    else
+        local head
+        head=$(git -C "$dir" rev-parse HEAD 2>/dev/null || echo none)
+        if [[ $head == "$ref" ]]; then
+            ok "$dir at $ref"
+            [[ -z $recursive ]] || run git -C "$dir" submodule update --init --recursive --depth 1 || return 1
+            return 0
+        fi
+        info "$dir is at $head, the pinned commit is $ref"
+        ask "Check out $ref in $dir (local changes there are kept by git or stop the checkout)?" || return 0
+    fi
+    run git -C "$dir" fetch -q --depth 1 origin "$ref" || return 1
+    run git -C "$dir" checkout -q FETCH_HEAD || return 1
+    if [[ -n $recursive ]]; then
+        run git -C "$dir" submodule update --init --recursive --depth 1 || return 1
+    fi
+    ok "$dir at $(git -C "$dir" rev-parse --short HEAD) ($ref)"
+}
+
 # ------------------------------------------------------------------ 4. MuJoCo Menagerie
 
 clone_menagerie() {
-    step "MuJoCo Menagerie (robot models: $MENAGERIE)"
-    if [[ -f $MENAGERIE/shadow_hand/right_hand.xml ]]; then
-        ok "$MENAGERIE ($(git -C "$MENAGERIE" log -1 --format='%h %cs' 2>/dev/null || echo 'not a git clone'))"
-        info "update later with: git -C $MENAGERIE pull --ff-only"
+    step "MuJoCo Menagerie (robot models: $MENAGERIE at $MENAGERIE_REF)"
+    if [[ ! -d $MENAGERIE/.git ]] && ! ask "Clone the Menagerie into $MENAGERIE (shallow, ~300 MB)?"; then
+        warn "no Menagerie: retarget, physics and train fail"
         return
     fi
-    if [[ -e $MENAGERIE ]]; then
-        warn "$MENAGERIE exists but has no shadow_hand/right_hand.xml; move it away and run this again"
-        return
-    fi
-    ask "Clone the Menagerie into $MENAGERIE (git clone --depth 1, ~300 MB)?" || { warn "no Menagerie: retarget, physics and train fail"; return; }
-    run mkdir -p -- "$SRC"
-    run git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie "$MENAGERIE" || warn "git clone failed"
-    [[ -f $MENAGERIE/shadow_hand/right_hand.xml ]] && ok "cloned" || warn "shadow_hand/right_hand.xml missing in the clone"
+    clone_at https://github.com/google-deepmind/mujoco_menagerie.git "$MENAGERIE" "$MENAGERIE_REF" \
+        || { warn "the Menagerie checkout failed (see above)"; return; }
+    [[ -f $MENAGERIE/shadow_hand/right_hand.xml ]] || warn "shadow_hand/right_hand.xml missing in $MENAGERIE"
 }
 
 # ------------------------------------------------------------------ 5. model weights
@@ -444,12 +480,8 @@ explain_mano() {
 install_wilor() {
     step "WiLoR (hands2d.backend = \"wilor\", optional)"
     local repo="$SRC/WiLoR"
-    if [[ ! -d $repo/wilor ]]; then
-        run mkdir -p -- "$SRC"
-        run git clone --recursive https://github.com/rolpotamias/WiLoR.git "$repo" || { warn "git clone failed"; return; }
-    else
-        ok "$repo"
-    fi
+    clone_at https://github.com/rolpotamias/WiLoR.git "$repo" "$WILOR_REF" --recursive \
+        || { warn "the WiLoR checkout failed (see above)"; return; }
     write_constraints
     # WiLoR's requirements.txt targets Python 3.10 + torch 2.0 (conda). Into this venv: keep our
     # torch (constraints) and opencv-contrib-python (drop opencv-python), skip the gradio demo UI.
@@ -487,12 +519,8 @@ EOF
 install_hamer() {
     step "HaMeR (hands2d.backend = \"hamer\", optional)"
     local repo="$SRC/hamer"
-    if [[ ! -d $repo/hamer ]]; then
-        run mkdir -p -- "$SRC"
-        run git clone --recursive https://github.com/geopavlakos/hamer.git "$repo" || { warn "git clone failed"; return; }
-    else
-        ok "$repo"
-    fi
+    clone_at https://github.com/geopavlakos/hamer.git "$repo" "$HAMER_REF" --recursive \
+        || { warn "the HaMeR checkout failed (see above)"; return; }
     write_constraints
     # The backend's default hand boxes come from MediaPipe (hands2d.hamer_detector = "mediapipe"),
     # so ViTPose / detectron2 (HaMeR's own demo detector) are not installed here.

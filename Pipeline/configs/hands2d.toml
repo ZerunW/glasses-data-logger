@@ -11,6 +11,8 @@ model_path = ""
 # Download the model from Google's official URL when it is missing (never when the environment
 # variable GLASSESDATA_NO_DOWNLOAD is set, as the tests do).
 allow_download = true
+# SHA-256 that a downloaded model must have (the float16 model of November 2026); "" = no check.
+model_sha256 = "fbc2a30080c3c557093b5ddfc334698132eb341044ccee322ccf8bcf3607cde1"
 num_hands = 2
 min_detection_confidence = 0.5   # palm detector
 min_presence_confidence = 0.5    # landmark model: below this the hand is re-detected

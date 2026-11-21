@@ -59,6 +59,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--checkpoint", help="checkpoint file for --play / --resume (default: the latest)")
     p.add_argument("--episodes", type=int, help="--play episodes (default train.play.episodes)")
     p.add_argument("--no-video", action="store_true", help="--play without the video")
+    p.add_argument("--allow-unaligned", action="store_true",
+                   help="train / play although the world is not gravity-aligned (camera_traj.npz meta, step world)")
     p.add_argument("--config", metavar="FILE", help="extra TOML merged over configs/ and pipeline.toml")
     p.add_argument("--set", dest="sets", action="append", default=[], metavar="SECTION.KEY=VALUE")
     return p
@@ -224,6 +226,19 @@ def make_environment(ep: Any, robot: str, side: str, train: Mapping[str, Any], b
     return task, scene, sim
 
 
+def check_gravity(ep: Any, allow: bool) -> None:
+    """Refuse a world that is not gravity-aligned (no IMU gravity in step ``world``): MuJoCo's
+    gravity (-z) would not point down, so the learned behaviour would be wrong."""
+    from ..sim.data import gravity_aligned
+
+    if gravity_aligned(ep) is False:
+        if not allow:
+            raise PipelineError(f"{ep.path.name}: the world is not gravity-aligned (derived/camera_traj.npz: no IMU "
+                                "gravity), so MuJoCo's gravity would not point down; fix the imu step, or pass "
+                                "--allow-unaligned to train anyway")
+        log.warning("the world is not gravity-aligned; training anyway (--allow-unaligned)")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     from ..episode import Episode
@@ -239,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
 
         parse_task_config(train)  # fail fast on configuration errors
         runner_config(train.get("ppo") or {})
+        check_gravity(ep, args.allow_unaligned)
         rl_root = ep.derived / "rl"
         if args.play:
             from .play import run_play

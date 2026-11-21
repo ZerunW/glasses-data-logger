@@ -190,21 +190,32 @@ class Episode:
         """Decode ``video.mp4`` with PyAV: yields ``(frame_index, image)``, BGR uint8 ``(h, w, 3)``
         (or ``(h, w)`` with ``gray``), downsampled with ``cv2.INTER_AREA`` to the grid of
         :func:`geometry.downsample_size`. ``indices`` (any iterable) selects frames; decoding stops
-        after the last one."""
+        after the last one.
+
+        With a timeline (``ingest`` ran) the frames are those of the timeline: frames the video has
+        beyond it are not decoded, and a requested frame outside it, or a video that ends before
+        the timeline (or a requested frame) does, raises :class:`PipelineError` (the timeline and
+        the video disagree: run ingest again)."""
         import av  # lazy
         import cv2
 
+        n_timeline = len(self.timeline()["t"]) if self.has("timeline.npz") else None
         wanted = None if indices is None else sorted({int(i) for i in indices})
         if wanted is not None and not wanted:
             return
+        if wanted is not None and n_timeline is not None and (wanted[0] < 0 or wanted[-1] >= n_timeline):
+            raise PipelineError(f"{self.path.name}: frame {wanted[-1] if wanted[-1] >= n_timeline else wanted[0]} "
+                                f"requested, the timeline has frames 0..{n_timeline - 1}")
         wanted_set = None if wanted is None else set(wanted)
-        last = None if wanted is None else wanted[-1]
+        last = (n_timeline - 1 if n_timeline is not None else None) if wanted is None else wanted[-1]
+        decoded = 0
         with av.open(str(self.video_path)) as container:
             stream = container.streams.video[0]
             stream.thread_type = "AUTO"
             for index, frame in enumerate(container.decode(stream)):
                 if last is not None and index > last:
                     break
+                decoded = index + 1
                 if wanted_set is not None and index not in wanted_set:
                     continue
                 image = frame.to_ndarray(format="gray" if gray else "bgr24")
@@ -212,6 +223,10 @@ class Episode:
                     size = geo.downsample_size(image.shape[1], image.shape[0], downsample)
                     image = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
                 yield index, image
+        if last is not None and decoded <= last:
+            expected = f"the timeline has {n_timeline} frames" if n_timeline is not None else f"frame {last} was requested"
+            raise PipelineError(f"{self.video_path.name} of {self.path.name} decodes to {decoded} frames but {expected}: "
+                                "the video and derived/timeline.npz disagree (run ingest again with --force)")
 
     # ---------------------------------------------------------------- metadata
 

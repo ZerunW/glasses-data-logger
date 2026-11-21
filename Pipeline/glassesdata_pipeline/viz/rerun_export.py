@@ -27,7 +27,8 @@ Entity tree::
 The video: ``rerun_video = "asset"`` logs ``video.mp4`` once as an ``AssetVideo`` and references
 its frames by timestamp (cheap). Rerun's native viewer decodes H.265 through a separately
 installed FFmpeg >= 5.1; use ``rerun_video = "jpeg"`` (downsampled JPEG frames) when that is not
-available, or ``"none"``.
+available, or ``"none"``. The pinhole and the 2D keypoints are in the pixels of the logged images
+(the JPEG size for ``"jpeg"``, :func:`jpeg_size`, :func:`to_image_px`).
 """
 
 from __future__ import annotations
@@ -59,6 +60,24 @@ def _strips(J: np.ndarray) -> list[np.ndarray]:
     return [J[c] for c in CHAINS if np.all(np.isfinite(J[c]))]
 
 
+def jpeg_size(width: int, height: int, max_height: int) -> tuple[int, int]:
+    """Size of a JPEG frame of the ``rerun_video = "jpeg"`` fallback: downscaled to ``max_height``
+    when taller (aspect kept)."""
+    if height <= max_height:
+        return int(width), int(height)
+    return int(round(width * max_height / height)), int(max_height)
+
+
+def to_image_px(uv: np.ndarray, src_wh: tuple[int, int], dst_wh: tuple[int, int]) -> np.ndarray:
+    """Pixels of a ``src_wh`` image -> pixels of the same image resized to ``dst_wh`` (pixel
+    centres at integers, the convention of :meth:`geometry.Camera.resized`)."""
+    uv = np.asarray(uv, dtype=np.float64)
+    if tuple(src_wh) == tuple(dst_wh):
+        return uv
+    s = np.array([dst_wh[0] / src_wh[0], dst_wh[1] / src_wh[1]])
+    return (uv + 0.5) * s - 0.5
+
+
 def export_rrd(ep: Episode, out_path: str | Path, vcfg: Any) -> dict[str, Any]:
     """Write the ``.rrd``; returns ``{"path", "frames", "video"}``."""
     rr = require("rerun", RERUN_PIN, "the Rerun export (step viz)")
@@ -72,9 +91,7 @@ def export_rrd(ep: Episode, out_path: str | Path, vcfg: Any) -> dict[str, Any]:
     cam = data.camera
 
     # ---------------------------------------------------------------- static content
-    if cam is not None:
-        rec.log("world/camera/image", rr.Pinhole(image_from_camera=cam.K, resolution=[cam.width, cam.height],
-                                                 camera_xyz=rr.ViewCoordinates.RDF, image_plane_distance=0.15), static=True)
+    # (the pinhole is logged after the video: its resolution is that of the logged images)
     if data.T_world_cam is not None:
         ok = np.all(np.isfinite(data.T_world_cam), axis=(-1, -2))
         rec.log("world/camera_path", rr.LineStrips3D([data.T_world_cam[ok, :3, 3]], colors=[_rgb("#3b3a37")], radii=[0.002]),
@@ -98,6 +115,7 @@ def export_rrd(ep: Episode, out_path: str | Path, vcfg: Any) -> dict[str, Any]:
     # ---------------------------------------------------------------- video
     video_mode = str(vcfg.get("rerun_video", "asset"))
     video_info = "none"
+    image_wh = (cam.width, cam.height) if cam is not None else None  # pixels of the logged images
     if video_mode == "asset" and ep.video_path.is_file():
         try:
             asset = rr.AssetVideo(path=str(ep.video_path))
@@ -118,9 +136,9 @@ def export_rrd(ep: Episode, out_path: str | Path, vcfg: Any) -> dict[str, Any]:
         height = int(vcfg.get("rerun_jpeg_height", 640))
         count = 0
         for f, image in ep.frames(range(0, data.T, stride)):
-            if image.shape[0] > height:
-                scale = height / image.shape[0]
-                image = cv2.resize(image, (int(round(image.shape[1] * scale)), height), interpolation=cv2.INTER_AREA)
+            size = jpeg_size(image.shape[1], image.shape[0], height)
+            if size != (image.shape[1], image.shape[0]):
+                image = cv2.resize(image, size, interpolation=cv2.INTER_AREA)
             ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
             if not ok:
                 continue
@@ -128,8 +146,12 @@ def export_rrd(ep: Episode, out_path: str | Path, vcfg: Any) -> dict[str, Any]:
             rec.log("world/camera/image/video", rr.EncodedImage(contents=buf.tobytes(), media_type="image/jpeg"))
             count += 1
         video_info = f"jpeg ({count} frames, stride {stride})"
-        if cam is not None and height < cam.height:
-            log.info("JPEG frames are downsampled; the pinhole keeps the full-resolution intrinsics")
+        if cam is not None:
+            image_wh = jpeg_size(cam.width, cam.height, height)
+    if cam is not None:
+        pin = cam if image_wh == (cam.width, cam.height) else cam.resized(*image_wh)
+        rec.log("world/camera/image", rr.Pinhole(image_from_camera=pin.K, resolution=list(image_wh),
+                                                 camera_xyz=rr.ViewCoordinates.RDF, image_plane_distance=0.15), static=True)
 
     # ---------------------------------------------------------------- per frame
     kp2d = None
@@ -158,6 +180,8 @@ def export_rrd(ep: Episode, out_path: str | Path, vcfg: Any) -> dict[str, Any]:
                                                                   colors=[_rgb("#8a8985", 160)], radii=[0.0015]))
             if kp2d is not None and f < len(kp2d):
                 uv = kp2d[f, slot, :, :2]
+                if cam is not None:  # full-resolution pixels -> pixels of the logged images
+                    uv = to_image_px(uv, (cam.width, cam.height), image_wh)
                 ok = np.all(np.isfinite(uv), axis=-1)
                 rec.log(f"world/camera/image/hands/{side}", rr.Points2D(uv[ok], colors=[color], radii=[2.0]))
                 strips2d = [uv[c] for c in CHAINS if np.all(ok[c])]

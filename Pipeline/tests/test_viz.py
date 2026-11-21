@@ -76,3 +76,17 @@ def test_rerun_export(recording_copy):
     ep = Episode(recording_copy)
     info = export_rrd(ep, ep.derived / "viz" / "episode.rrd", {"rerun_video": "jpeg", "rerun_jpeg_stride": 8})
     assert Path(info["path"]).stat().st_size > 10_000
+
+
+def test_jpeg_fallback_geometry():
+    """The JPEG fallback logs the pinhole at the JPEG resolution and 2D keypoints in its pixels."""
+    from glassesdata_pipeline import geometry as geo
+    from glassesdata_pipeline.viz.rerun_export import jpeg_size, to_image_px
+
+    assert jpeg_size(720, 1280, 640) == (360, 640) and jpeg_size(360, 640, 640) == (360, 640)
+    cam = geo.Camera.fov_default(720, 1280, 65.0)
+    small = cam.resized(*jpeg_size(720, 1280, 640))
+    X = np.array([[0.05, -0.1, 0.6], [-0.2, 0.3, 1.1]])
+    uv_full = cam.project(X)
+    np.testing.assert_allclose(to_image_px(uv_full, (720, 1280), (360, 640)), small.project(X), atol=1e-9)
+    np.testing.assert_array_equal(to_image_px(uv_full, (720, 1280), (720, 1280)), uv_full)

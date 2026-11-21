@@ -509,7 +509,8 @@ def fig_timelines(data: EpisodeData, out: Path) -> Path | None:
             if dev is not None:
                 ax.plot(t[: len(dev)], np.asarray(dev, dtype=np.float64) * 100, color=object_hex(k), lw=1.2, label=obj.id)
         score = data.physics.get("plausibility")
-        _panel(ax, "Simulated vs reconstructed object position" + (f"  ·  plausibility {score:.2f}" if score is not None else ""), "cm")
+        note = f"plausibility {score:.2f}" if score is not None else str(data.physics.get("status") or "")
+        _panel(ax, "Simulated vs reconstructed object position" + (f"  ·  {note}" if note else ""), "cm")
 
     if data.joints is not None or data.gt is not None:
         panels.append(("wrist", 1.2, p_wrist))

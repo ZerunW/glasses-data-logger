@@ -127,3 +127,20 @@ def test_episode_metrics_and_summary():
     assert P.termination_reason({"obj_pos": True, "fell": False}, True, False) == "obj_pos"
     assert P.termination_reason({}, False, True) == "time_out"
     assert P.termination_reason({}, False, False) == "running"
+
+
+def test_train_refuses_a_world_without_gravity(tmp_path, capsys):
+    from glassesdata_pipeline.__main__ import main as cli
+    from glassesdata_pipeline.episode import Episode
+
+    rec = tmp_path / "rec"
+    rec.mkdir()
+    Episode(rec).save_npz("camera_traj", {"step": "world", "gravity_aligned": False},
+                          T_world_cam=np.tile(np.eye(4), (3, 1, 1)), valid=np.ones(3, bool))
+    assert cli(["train", str(rec), "--backend", "mujoco"]) == 1
+    assert "--allow-unaligned" in capsys.readouterr().err
+    assert cli(["train", str(rec), "--play"]) == 1
+    assert "gravity-aligned" in capsys.readouterr().err
+    if importlib.util.find_spec("rsl_rl") is None:  # with the flag it gets past the check
+        assert cli(["train", str(rec), "--backend", "mujoco", "--allow-unaligned"]) == 1
+        assert "rsl-rl-lib" in capsys.readouterr().err

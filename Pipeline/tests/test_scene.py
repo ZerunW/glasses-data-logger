@@ -228,3 +228,35 @@ def test_wireframe_renderer_draws_where_the_camera_looks(recording_copy):
         pixel = img[int(round(uv[1])), int(round(uv[0]))].astype(float)
         hue = np.array([b, g, r]) / max(b, g, r)
         assert np.allclose(pixel / pixel.max(), hue, atol=0.25)  # the object's colour (shaded) at its centre
+
+
+def test_scene_without_table_gets_an_inferred_support(recording_copy, caplog):
+    """No objects/table.json: a support box under the objects (top = their lowest resting bottom)
+    instead of a floor 1.45 m below the camera; a world that is not gravity-aligned is recorded."""
+    from glassesdata_pipeline.sim.data import gravity_aligned
+    from glassesdata_pipeline.steps import scene
+
+    fabricate_sim(recording_copy)
+    ep = Episode(recording_copy, {"scene": {"replay": "none"}})
+    (ep.derived / "objects" / "table.json").unlink()
+    traj = ep.load_npz("camera_traj")
+    assert gravity_aligned(ep) is None  # the fabricated file has no flag
+    ep.save_npz("camera_traj", {**traj.pop("meta"), "gravity_aligned": False}, **traj)
+    assert gravity_aligned(ep) is False
+    scene.run(ep, ep.config)
+    info = json.loads((ep.derived / "sim" / "scene.json").read_text())
+    assert info["table"]["support"] == "inferred" and info["gravity_aligned"] is False
+    assert "not gravity-aligned" in caplog.text
+    gt = ep.gt
+    bottoms = []
+    for k in range(len(gt.object_ids)):
+        V = mjcf.box_mesh(gt["object_sizes"][k])[0]
+        bottoms.append(geo.transform(gt["T_world_obj"][0, k], V)[:, 2].min())
+    data = load_episode_data(ep, with_gt=False)
+    est = min(geo.transform(o.T_world_obj[o.first_valid], mjcf.box_mesh(o.extents())[0])[:, 2].min() for o in data.objects)
+    assert info["table"]["top_z"] == pytest.approx(est, abs=1e-6)
+    assert info["table"]["top_z"] == pytest.approx(min(bottoms), abs=0.01)
+    assert info["floor_z"] == pytest.approx(-1.45, abs=1e-6) and info["table"]["floor_z"] == info["floor_z"]
+    root = ET.parse(ep.derived / "sim" / "scene.xml").getroot()
+    names = {b.get("name"): b for b in root.iter("body")}
+    assert mjcf.TABLE_BODY in names

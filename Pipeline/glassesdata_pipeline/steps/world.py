@@ -42,7 +42,7 @@ from ..episode import Episode
 from ..errors import PipelineError
 
 NAME = "world"
-VERSION = 1
+VERSION = 2  # 2: a hand seen in a single frame is kept (not smoothed)
 REQUIRES = ["ingest", "hand3d", "slam", "imu"]
 INPUTS = ["derived/timeline.npz", "derived/slam.npz", "derived/imu.npz", "derived/hand3d.npz", "derived/profile.json"]
 OUTPUTS = ["camera_traj.npz", "hands_world.npz"]
@@ -162,7 +162,16 @@ def hands_world(ep: Episode, T_world_cam: np.ndarray, cam_valid: np.ndarray, p: 
     for h in range(2):
         z = raw[:, h].reshape(T, -1)
         present = np.any(np.isfinite(z), axis=1)
-        if present.sum() < 2:
+        if present.sum() == 1:  # nothing to smooth with: keep the one measurement as it is
+            f = int(np.flatnonzero(present)[0])
+            keep = bool(np.all(np.isfinite(raw[f, h])))
+            if keep:
+                joints[f, h] = raw[f, h]
+                observed[f, h] = True
+            quality[["left", "right"][h]] = {"present": 1, "rejected": int(not keep), "smoothed": 0,
+                                              "single_frame": True}
+            continue
+        if present.sum() == 0:
             continue
         # Adaptive process noise: when the gate rejects too many present hands, the motion is
         # faster than q_accel allows (the filter diverges and rejects everything after); retry

@@ -25,6 +25,8 @@ Scores (:func:`object_stats`, :func:`plausibility`), all from numpy:
 * ``plausibility = mean_k(exp(-pos_k / pos_scale) * exp(-rot_k / rot_scale)) * exp(-max(0, pen -
   tol) / pen_scale) * (0.5 + 0.5 * lift_rate)`` (the last factor only when the demo lifts
   something) - in [0, 1], 1 = the simulated hands reproduce the reconstructed object motion.
+  ``None`` (``components["status"]`` says why) when no object had a valid reconstructed pose to
+  compare with: nothing was checked, which is not the same as a perfect score.
 """
 
 from __future__ import annotations
@@ -94,8 +96,9 @@ def object_stats(sim_T: np.ndarray, rec_T: np.ndarray, valid: np.ndarray, graspe
 
 
 def plausibility(stats: Mapping[str, Mapping[str, Any]], max_penetration_m: float,
-                 cfg: Mapping[str, Any]) -> tuple[float, dict[str, Any]]:
-    """Score in [0, 1] and its components (see module docstring)."""
+                 cfg: Mapping[str, Any]) -> tuple[float | None, dict[str, Any]]:
+    """Score in [0, 1] and its components (see module docstring); ``(None, {..., "status":
+    "inconclusive ..."})`` when no object was compared."""
     pos_scale = float(cfg.get("pos_scale_m", 0.05))
     rot_scale = float(cfg.get("rot_scale_deg", 30.0))
     tracking = []
@@ -103,15 +106,19 @@ def plausibility(stats: Mapping[str, Mapping[str, Any]], max_penetration_m: floa
         if "pos_dev_m" not in s:
             continue
         tracking.append(math.exp(-s["pos_dev_m"]["mean"] / pos_scale) * math.exp(-s["rot_dev_deg"]["mean"] / rot_scale))
-    s_track = float(np.mean(tracking)) if tracking else 1.0
     pen = max(0.0, float(max_penetration_m))
     s_pen = math.exp(-max(0.0, pen - float(cfg.get("penetration_tol_m", 0.005))) / float(cfg.get("penetration_scale_m", 0.01)))
     lifts = [s for s in stats.values() if s.get("demo_lifts")]
     lift_rate = float(np.mean([bool(s.get("lift_success")) for s in lifts])) if lifts else None
     s_lift = 1.0 if lift_rate is None else 0.5 + 0.5 * lift_rate
+    if not tracking:
+        return None, {"tracking": None, "penetration": s_pen, "lift": s_lift, "lift_rate": lift_rate,
+                      "lifted_objects": len(lifts), "compared_objects": 0,
+                      "status": "inconclusive (no object with a valid reconstructed pose was compared)"}
+    s_track = float(np.mean(tracking))
     score = float(np.clip(s_track * s_pen * s_lift, 0.0, 1.0))
     return score, {"tracking": s_track, "penetration": s_pen, "lift": s_lift, "lift_rate": lift_rate,
-                   "lifted_objects": len(lifts)}
+                   "lifted_objects": len(lifts), "compared_objects": len(tracking), "status": "ok"}
 
 
 def lerp_pose(p0: np.ndarray, q0: np.ndarray, p1: np.ndarray, q1: np.ndarray, s: float) -> tuple[np.ndarray, np.ndarray]:

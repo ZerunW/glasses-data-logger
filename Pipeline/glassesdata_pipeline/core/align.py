@@ -11,6 +11,7 @@ TUM file helpers.
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Any
 
@@ -358,8 +359,9 @@ def read_tum(path: str | os.PathLike) -> tuple[NDArray[np.float64], NDArray[np.f
 
     Blank lines and lines starting with ``#`` are skipped; commas are accepted
     as separators. Quaternions are normalised. Returns ``(timestamps (N,),
-    poses (N, 4, 4))`` camera-to-world. Raises ``ValueError`` on a line that
-    does not have 8 numbers.
+    poses (N, 4, 4))`` camera-to-world. Raises ``ValueError`` naming the line
+    for a line that does not have 8 numbers, a non-finite value, or a
+    quaternion of (near) zero length.
     """
     rows = []
     with open(path, "r", encoding="utf-8") as f:
@@ -369,8 +371,16 @@ def read_tum(path: str | os.PathLike) -> tuple[NDArray[np.float64], NDArray[np.f
                 continue
             parts = s.replace(",", " ").split()
             if len(parts) != 8:
-                raise ValueError(f"{path}:{lineno}: expected 8 values, got {len(parts)}")
-            rows.append([float(x) for x in parts])
+                raise ValueError(f"{path}:{lineno}: expected 8 values (timestamp tx ty tz qx qy qz qw), got {len(parts)}")
+            try:
+                row = [float(x) for x in parts]
+            except ValueError:
+                raise ValueError(f"{path}:{lineno}: not a number in {s!r}") from None
+            if not all(math.isfinite(x) for x in row):
+                raise ValueError(f"{path}:{lineno}: non-finite value in {s!r}")
+            if math.sqrt(sum(x * x for x in row[4:8])) < 1e-9:
+                raise ValueError(f"{path}:{lineno}: zero-length quaternion in {s!r}")
+            rows.append(row)
     if not rows:
         return np.zeros(0), np.zeros((0, 4, 4))
     a = np.asarray(rows, dtype=np.float64)

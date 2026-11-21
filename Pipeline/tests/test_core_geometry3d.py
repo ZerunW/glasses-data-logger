@@ -276,3 +276,23 @@ def test_hand_rigid_motion_and_contact_grasped():
     g = gr.contact_grasped(d, eps, np.zeros(T), np.zeros((T, 2)))
     assert g[18:43, 1].all() and not g[:18].any() and not g[43:].any() and not g[:, 0].any()
     assert not gr.contact_grasped(np.full((T, 2, 5), 0.2), eps, np.zeros(T), np.zeros((T, 2))).any()
+
+
+def test_grasp_speed_and_windows_use_timestamps():
+    fps = 24.0
+    J = _hand_track(144, fps, 2.0, 4.5, move=True)
+    t = np.arange(144) / fps
+    eps, _ = gr.detect_grasps(J, fps)
+    eps_t, _ = gr.detect_grasps(J, fps, t=t)  # uniform timestamps: the same result
+    assert [(e["onset"], e["release"]) for e in eps] == [(e["onset"], e["release"]) for e in eps_t]
+    # a frame drop: 2 s of positions moving at 0.5 m/s, with frames 10-19 missing from the video
+    keep = np.r_[0:10, 20:48]
+    tt = t[keep]
+    pts = np.column_stack([0.5 * tt, 0 * tt, 0 * tt])
+    v = gr.speed(pts, fps, 2, tt)
+    np.testing.assert_allclose(v, 0.5, rtol=1e-9)
+    assert gr.speed(pts, fps, 2)[9] > 1.0  # frame counting overestimates across the drop
+    # the move window is time based: a drop shortens it in frames
+    J_drop = J[np.r_[0:60, 72:144]]
+    eps_d, _ = gr.detect_grasps(J_drop, fps, t=np.r_[t[0:60], t[72:144]])
+    assert len(eps_d) == 1 and abs(eps_d[0]["onset"] - 48) <= 3

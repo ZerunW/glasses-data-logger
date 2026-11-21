@@ -223,6 +223,21 @@ def resolve_table_top(table: dict[str, Any], polygon: np.ndarray | None, objects
     return z
 
 
+def gravity_aligned(ep: Episode) -> bool | None:
+    """``gravity_aligned`` from the meta of ``derived/camera_traj.npz`` (step ``world``): False when
+    the world is the SLAM frame because no IMU gravity was available (then MuJoCo's gravity, -z,
+    does not point down in the scene), None when unknown (no file / older file)."""
+    from ..episode import read_meta
+
+    path = ep.path / "derived" / "camera_traj.npz"
+    meta = read_meta(path) if path.is_file() else None
+    value = None if meta is None else meta.get("gravity_aligned")
+    return None if value is None else bool(value)
+
+
+NOT_ALIGNED = "inconclusive (world not gravity-aligned)"
+
+
 def load_episode_data(ep: Episode, with_gt: bool = True) -> EpisodeData:
     """Everything available for ``ep``; ``with_gt`` adds ``gt/`` (synthetic recordings)."""
     tl = _load(ep, "timeline.npz")

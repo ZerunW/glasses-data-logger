@@ -56,9 +56,13 @@ camera-to-world::
     timestamp tx ty tz qx qy qz qw
 
 ``slam.import_time`` says what the timestamps are: ``"seconds"`` (episode seconds, i.e. video
-frame ``i`` at ``timeline.t[i]``), ``"frames"`` (video frame indices; what you get when the tool
-ran on the frames extracted in order), or ``"auto"`` (frames when every stamp is an integer).
-``slam.import_time_offset_s`` is added to the stamps. Frames match the nearest stamp within
+frame ``i`` at ``timeline.t[i]``) or ``"frames"`` (video frame indices; what you get when the tool
+ran on the frames extracted in order). Set it explicitly. ``"auto"`` decides only when that is
+unambiguous: ``"frames"`` when every stamp is an integer and there is one stamp per video frame,
+``"seconds"`` when some stamp is not an integer; whole-number stamps of another count (a
+keyframe-only file) are an error asking for the unit. ``slam.import_time_offset`` (in the
+stamps' unit: seconds or frames) is added to the stamps (the old name ``import_time_offset_s``
+is still read, with a deprecation warning). Frames match the nearest stamp within
 ``import_max_dt_s`` (0 = half a frame); frames between two stamps less than ``import_max_gap_s``
 apart are interpolated (slerp/lerp), which covers keyframe-only trajectories. The first valid pose
 is moved to the identity. Scale: ``slam.import_scale`` is a number (multiplies translations) or
@@ -68,7 +72,7 @@ Exporting (check against the version of the tool you run; all three give camera-
 
 * Frames for the tools: ``python -c "from glassesdata_pipeline.episode import Episode; import cv2;
   [cv2.imwrite(f'frames/{i:06d}.png', im) for i, im in Episode('REC').frames()]"`` (or ``ffmpeg -i
-  video.mp4 frames/%06d.png``, numbered from 1: subtract 1 or set ``import_time_offset_s``).
+  video.mp4 frames/%06d.png``, numbered from 1: set ``import_time_offset = -1``).
   Use the camera intrinsics in ``derived/camera.json``; undistort first if the tool assumes a
   pinhole without distortion.
 * MASt3R-SLAM: its ``save_traj`` writes ``logs/<sequence>.txt`` in TUM format for the
@@ -167,7 +171,7 @@ DEFAULTS: dict[str, Any] = {
     "max_lost_frames": 12,
     "import_path": "",
     "import_time": "auto",
-    "import_time_offset_s": 0.0,
+    "import_time_offset": 0.0,
     "import_max_dt_s": 0.0,
     "import_max_gap_s": 0.5,
     "import_scale": "auto",
@@ -175,9 +179,18 @@ DEFAULTS: dict[str, Any] = {
 
 
 def params(cfg) -> dict[str, Any]:
-    """``[slam]`` merged over :data:`DEFAULTS`."""
-    section = cfg.get("slam", {}) if hasattr(cfg, "get") else {}
-    return {**DEFAULTS, **dict(section or {})}
+    """``[slam]`` merged over :data:`DEFAULTS` (the deprecated ``import_time_offset_s`` is mapped
+    to ``import_time_offset``)."""
+    section = dict((cfg.get("slam", {}) if hasattr(cfg, "get") else {}) or {})
+    if "import_time_offset_s" in section:
+        old = float(section.pop("import_time_offset_s"))
+        new = float(section.get("import_time_offset", 0.0))
+        log.warning("slam.import_time_offset_s is deprecated: use slam.import_time_offset (the same value, in the "
+                    "stamps' unit)")
+        if new != 0.0 and new != old:
+            raise PipelineError(f"slam.import_time_offset ({new}) and the deprecated import_time_offset_s ({old}) differ")
+        section["import_time_offset"] = old
+    return {**DEFAULTS, **section}
 
 
 # =============================================================================================
@@ -613,6 +626,23 @@ def associate_trajectory(frame_t: np.ndarray, stamps: np.ndarray, poses: np.ndar
     return out, valid
 
 
+def import_time_unit(mode: str, stamps: np.ndarray, n_frames: int, path: Any = "") -> str:
+    """``"frames"`` or ``"seconds"`` for ``slam.import_time`` (see the module docstring: ``"auto"``
+    never guesses from whole numbers alone)."""
+    if mode in ("frames", "seconds"):
+        return mode
+    if mode != "auto":
+        raise PipelineError(f"slam.import_time must be 'seconds', 'frames' or 'auto', got {mode!r}")
+    whole = bool(np.all(stamps == np.round(stamps)))
+    if not whole:
+        return "seconds"
+    if len(stamps) == n_frames:
+        return "frames"
+    raise PipelineError(f"{path}: the {len(stamps)} stamps are whole numbers but the video has {n_frames} frames, so "
+                        "they could be frame indices (a keyframe-only file) or whole seconds; set slam.import_time "
+                        "to 'frames' or 'seconds'")
+
+
 def run_import(ep: Episode, p: dict) -> dict[str, Any]:
     from ..core.align import read_tum, umeyama
 
@@ -631,10 +661,8 @@ def run_import(ep: Episode, p: dict) -> dict[str, Any]:
     t = np.asarray(tl["t"], dtype=np.float64)
     T = len(t)
     fps = 1.0 / float(np.median(np.diff(t))) if T > 1 else 24.0
-    mode = str(p["import_time"])
-    if mode == "auto":
-        mode = "frames" if np.allclose(stamps, np.round(stamps)) else "seconds"
-    stamps = stamps + float(p["import_time_offset_s"])
+    mode = import_time_unit(str(p["import_time"]), stamps, T, path)
+    stamps = stamps + float(p["import_time_offset"])
     if mode == "frames":
         frame_t = np.arange(T, dtype=np.float64)
         max_dt = float(p["import_max_dt_s"]) * fps if float(p["import_max_dt_s"]) > 0 else 0.5

@@ -47,6 +47,17 @@ def test_dropped_object_fails_the_lift_and_lowers_the_score():
     assert not still["demo_lifts"] and plausibility({"b": still}, 0.0, CFG)[1]["lift_rate"] is None
 
 
+def test_nothing_compared_is_inconclusive():
+    rec, _ = _lift_track()
+    none = object_stats(rec, rec, np.zeros(len(rec), bool), None, CFG)  # no valid reconstructed pose
+    score, comp = plausibility({"a": none}, 0.0, CFG)
+    assert score is None and comp["tracking"] is None and comp["status"].startswith("inconclusive")
+    score, comp = plausibility({}, 0.0, CFG)
+    assert score is None and comp["compared_objects"] == 0
+    good = object_stats(rec, rec, np.ones(len(rec), bool), None, CFG)
+    assert plausibility({"a": none, "b": good}, 0.0, CFG)[1]["status"] == "ok"
+
+
 def test_invalid_frames_are_ignored_and_helpers():
     rec, _ = _lift_track()
     sim = rec.copy()

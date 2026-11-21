@@ -218,3 +218,18 @@ def test_load_demo_wrong_side(tmp_path):
                                                        if k not in ("meta", "hands")}, hands=np.array(["left"]))
     with pytest.raises(PipelineError, match="hands"):
         R.load_demo(ep, "shadow", "right", tm.hand_joints, 8, {})
+
+
+def test_gap_masks():
+    t = np.arange(60) / 24.0
+    valid = np.ones(60, bool)
+    valid[10:13] = False  # 3 frames: 0.125 s
+    valid[30:50] = False  # 20 frames: 0.83 s > 0.5 s
+    tc = np.arange(0.0, t[-1] + 1e-9, 0.02)
+    observed, long_gap = R.gap_masks(t, valid, tc, 0.5)
+    nearest = np.abs(tc[:, None] - t[None]).argmin(axis=1)
+    np.testing.assert_array_equal(observed, valid[nearest])
+    np.testing.assert_array_equal(long_gap, (nearest >= 30) & (nearest < 50))
+    assert not (observed & long_gap).any()
+    _, none = R.gap_masks(t, valid, tc, 1.0)
+    assert not none.any()

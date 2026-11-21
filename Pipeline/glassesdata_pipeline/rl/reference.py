@@ -14,8 +14,11 @@ Steps (:func:`load_demo`):
    :func:`expand_joint_columns`; :func:`map_columns`). Hand validity: the retarget file's
    ``valid[:, hands.index(side)]`` when present, else finite ``err_m``.
 3. Keep the frame range where both the hand and the object are known (optionally cut to
-   ``train.segment_s``), fill gaps inside it (linear for scalars, slerp for quaternions; gaps
-   longer than ``train.max_gap_s`` are still filled but reported).
+   ``train.segment_s``), fill gaps inside it (linear for scalars, slerp for quaternions).
+   ``observed[T]`` marks the control steps whose nearest video frame has both the hand and the
+   object; ``long_gap[T]`` the steps inside a gap longer than ``train.max_gap_s``. The task
+   (:mod:`.task`) starts episodes only at observed steps, ends an episode (time-out) when it reaches
+   a long gap, and pays no tracking reward on unobserved steps.
 4. Resample to the control rate (``train.control_dt``) on the video timestamps, optionally smooth
    (``train.smooth_sigma_s``, Gaussian in seconds), and differentiate for velocities (object linear
    and world angular velocity; hand qvel in MuJoCo's convention: free joints have world linear and
@@ -93,13 +96,14 @@ class DemoReference:
     obj_linvel: np.ndarray  # (T, 3) world
     obj_angvel: np.ndarray  # (T, 3) world
     grasp: np.ndarray  # (T,) in [0, 1]
-    observed: np.ndarray  # (T,) bool: hand and object observed (not gap-filled) near this time
+    observed: np.ndarray  # (T,) bool: hand and object observed (not gap-filled) at the nearest frame
     object_id: str = ""
     side: str = "right"
     base_pos: np.ndarray | None = None  # (T, 3) hand root (filled from kinematics)
     base_quat: np.ndarray | None = None  # (T, 4)
     tips_pos: np.ndarray | None = None  # (T, K, 3)
     ctrl: np.ndarray | None = None  # (T, nu_hand) actuator targets of the reference
+    long_gap: np.ndarray | None = None  # (T,) bool: inside a gap longer than train.max_gap_s (None = none)
     info: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -340,6 +344,26 @@ def smooth_hand(qpos: np.ndarray, sigma_steps: float, joints: Sequence[JointSpec
     return out
 
 
+def gap_masks(t_src: np.ndarray, valid: np.ndarray, t_dst: np.ndarray, max_gap_s: float) -> tuple[np.ndarray, np.ndarray]:
+    """``(observed, long_gap)`` at the times ``t_dst``: ``observed`` = the nearest source frame is
+    valid; ``long_gap`` = the nearest source frame is an invalid one inside a run of invalid frames
+    whose length (time between the valid frames around it minus one frame) exceeds ``max_gap_s``."""
+    t_src = np.asarray(t_src, dtype=np.float64)
+    valid = np.asarray(valid, dtype=bool)
+    t_dst = np.asarray(t_dst, dtype=np.float64)
+    j = np.clip(np.searchsorted(t_src, t_dst), 1, max(len(t_src) - 1, 1)) if len(t_src) > 1 else np.zeros(len(t_dst), int)
+    if len(t_src) > 1:
+        j = np.where(np.abs(t_dst - t_src[j - 1]) <= np.abs(t_src[j] - t_dst), j - 1, j)
+    observed = valid[j]
+    long_src = np.zeros(len(t_src), dtype=bool)
+    idx = np.nonzero(valid)[0]
+    frame = float(np.median(np.diff(t_src))) if len(t_src) > 1 else 0.0
+    for a, b in zip(idx[:-1], idx[1:]):
+        if b - a > 1 and t_src[b] - t_src[a] - frame > max_gap_s:
+            long_src[a + 1:b] = True
+    return observed, long_src[j]
+
+
 def longest_gap_s(t: np.ndarray, valid: np.ndarray) -> float:
     """Longest run of invalid samples between valid ones, in seconds (0 when none)."""
     t = np.asarray(t, dtype=np.float64)
@@ -523,18 +547,19 @@ def load_demo(ep: Any, robot: str, side: str, joints: Sequence[JointSpec], nv_ha
     obj_pos = gaussian_smooth(resample_linear(t, obj_pos, t_ctrl), sigma)
     obj_quat = smooth_quats(resample_quat(t, obj_quat, t_ctrl), sigma)
     grasp = np.clip(resample_linear(t, grasp, t_ctrl), 0.0, 1.0)
-    nearest = np.clip(np.searchsorted(t, t_ctrl), 0, len(t) - 1)
-    observed = (hv & ov)[nearest]
-    gap = max(longest_gap_s(t, hv), longest_gap_s(t, ov))
     max_gap = float(train.get("max_gap_s", 0.5))
-    if gap > max_gap:
-        log.warning("reference has a gap of %.2f s (> train.max_gap_s = %.2f s) filled by interpolation", gap, max_gap)
+    observed, long_gap = gap_masks(t, hv & ov, t_ctrl, max_gap)
+    gap = max(longest_gap_s(t, hv), longest_gap_s(t, ov))
+    if long_gap.any():
+        log.warning("reference has gaps up to %.2f s (> train.max_gap_s = %.2f s, %d control steps): episodes do "
+                    "not start there and end when they reach one", gap, max_gap, int(long_gap.sum()))
     return DemoReference(
         dt=dt, t=t_ctrl, hand_qpos=hand_q, hand_qvel=hand_qvel_from_qpos(hand_q, dt, joints, nv_hand),
         obj_pos=obj_pos, obj_quat=obj_quat, obj_linvel=finite_difference(obj_pos, dt),
         obj_angvel=angular_velocity_world(obj_quat, dt), grasp=grasp, observed=observed, object_id=oid,
-        side=side, info={"frames": [f0, f1], "longest_gap_s": gap, "retarget_err_m": _nanmean(err, sl),
-                         "observed_fraction": float(observed.mean())},
+        side=side, long_gap=long_gap,
+        info={"frames": [f0, f1], "longest_gap_s": gap, "retarget_err_m": _nanmean(err, sl),
+              "observed_fraction": float(observed.mean()), "long_gap_steps": int(long_gap.sum())},
     )
 
 

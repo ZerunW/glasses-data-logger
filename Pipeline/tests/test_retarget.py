@@ -151,3 +151,26 @@ def test_retarget_step_with_mink(recording_copy):
     assert out["qpos"].shape == (ep.gt.n_frames, len(out["qpos_names"]))
     err = out["err_m"][np.isfinite(out["err_m"])]
     assert np.median(err) < 0.02
+
+
+def test_iterate_keep_best_returns_the_best_iterate():
+    from glassesdata_pipeline.sim.retarget_mink import iterate_keep_best
+
+    # the error falls, then the iterate overshoots: the best q is returned, not the last
+    errors = iter([0.5, 0.2, 0.3, 0.29999])
+    qs = iter([np.full(3, k) for k in range(1, 5)])
+    q, e, n = iterate_keep_best(np.zeros(3), 1.0, lambda: (next(qs), next(errors)), 10, 1e-3)
+    assert e == 0.2 and np.array_equal(q, np.full(3, 2)) and n == 3
+    # nothing better than the start: the start is kept
+    q, e, n = iterate_keep_best(np.zeros(3), 0.1, lambda: (np.ones(3), 0.4), 5, 1e-3)
+    assert e == 0.1 and np.array_equal(q, np.zeros(3)) and n == 2
+    # converging: runs until the improvement is below tol, the last iterate is the best
+    state = {"e": 1.0}
+
+    def step():
+        state["e"] *= 0.5
+        return np.full(3, state["e"]), state["e"]
+
+    q, e, n = iterate_keep_best(np.zeros(3), 2.0, step, 30, 1e-3)
+    assert e == pytest.approx(0.5 ** n) and q[0] == e and 8 <= n <= 11
+    assert iterate_keep_best(np.zeros(2), 1.0, step, 0, 1e-3)[2] == 0

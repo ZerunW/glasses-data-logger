@@ -166,10 +166,11 @@ def _select_samples(tl: dict[str, Any], p: dict[str, Any]) -> tuple[dict[str, np
     tt, acc, gyro = tt[ok], acc[ok], gyro[ok]
     order = np.argsort(tt, kind="stable")
     tt, acc, gyro = tt[order], acc[order], gyro[order]
-    keep = np.concatenate([[True], np.diff(tt) > 0])
+    keep = np.concatenate([[True], np.diff(tt) > 0]) if tt.size else np.zeros(0, dtype=bool)
+    tt, acc, gyro = tt[keep], acc[keep], gyro[keep]  # duplicate stamps: the first sample
     if tt.size < 10:
         return None, "none"
-    return {"t": tt[keep], "acc": acc[keep], "gyro": gyro[keep]}, source
+    return {"t": tt, "acc": acc, "gyro": gyro}, source
 
 
 def _accel_scale(acc: np.ndarray, units: str) -> float:
@@ -208,7 +209,9 @@ def _mahony_gravity(t: np.ndarray, acc: np.ndarray, gyro: np.ndarray, p: dict) -
     t_rev = t[-1] - t[::-1]
     g_b = imf.gravity_in_sensor(imf.mahony(t_rev, acc[::-1], -gyro[::-1], kp, ki))[::-1]
     g = g_f + g_b
-    return g / np.linalg.norm(g, axis=1, keepdims=True)
+    n = np.linalg.norm(g, axis=1, keepdims=True)
+    # forward and backward estimates that (nearly) cancel give no direction: keep the forward one
+    return np.where(n > 1e-6, g / np.maximum(n, 1e-12), g_f)
 
 
 def calibrate(ep: Episode, p: dict[str, Any]) -> dict[str, Any]:

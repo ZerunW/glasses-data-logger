@@ -3,6 +3,10 @@
 * Video frames: ``frames.csv`` sorted by ``frame_index``; T = number of video frames (demuxed
   packets of ``video.mp4``; extra ``frames.csv`` rows are dropped with a warning). Episode time
   ``t = (phone_time_ns - t0_ns) * 1e-9`` with ``t0_ns`` = ``phone_time_ns`` of frame 0.
+  ``phone_time_ns`` that is not strictly increasing (a stalled or reordered arrival) is repaired
+  (:func:`repair_frame_times`: the offending frames get ``pts_us`` x 1000 + the median offset,
+  or monotone interpolation without usable ``pts_us``); the meta records ``time_repair`` and
+  ``repaired_frames``.
 * IMU: ``motion.csv`` rows from ``ingest.imu_sources`` (default only ``"glasses"``, the head IMU;
   the app also writes ``"neuralBand"``, a wrist IMU, and ``"unknown"``) sorted by
   ``phone_time_ns``; ``imu_t`` in episode seconds; ``imu_source[N]`` (extra) the source of each
@@ -24,7 +28,7 @@ from ..errors import PipelineError
 from ..recording import read_frames, read_motion
 
 NAME = "ingest"
-VERSION = 2  # 2: imu_source, default imu_sources = ["glasses"]
+VERSION = 3  # 2: imu_source, default imu_sources = ["glasses"]; 3: frame time repair
 REQUIRES: list[str] = []
 INPUTS = ["frames.csv", "video.mp4", "motion.csv", "calibration.json", "profile.json"]
 OUTPUTS = ["timeline.npz", "camera.json", "profile.json"]
@@ -75,9 +79,11 @@ def build_timeline(ep: Episode, icfg) -> tuple[dict[str, np.ndarray], dict]:
     elif not ep.video_path.is_file():
         log.warning("%s has no video.mp4", ep.path.name)
     frames = {k: v[:n] for k, v in frames.items()}
-    phone = frames["phone_ns"]
-    if np.any(np.diff(phone) <= 0):
-        log.warning("frames.csv phone_time_ns is not strictly increasing (%d steps <= 0)", int(np.sum(np.diff(phone) <= 0)))
+    phone, repair = repair_frame_times(frames["phone_ns"], frames["pts_us"])
+    if repair is not None:
+        log.warning("frames.csv phone_time_ns is not strictly increasing (%d steps <= 0): repaired %d frame times "
+                    "(%s)", repair["non_increasing_steps"], repair["repaired_frames"], repair["time_repair"])
+        notes.update(repair)
     t0 = int(phone[0])
     out: dict[str, np.ndarray] = {
         "frame_index": np.arange(n, dtype=np.int64),
@@ -89,6 +95,51 @@ def build_timeline(ep: Episode, icfg) -> tuple[dict[str, np.ndarray], dict]:
     out.update(_imu_arrays(ep, icfg, t0))
     notes["t0_ns"] = t0
     return out, notes
+
+
+def repair_frame_times(phone_ns: np.ndarray, pts_us: np.ndarray) -> tuple[np.ndarray, dict | None]:
+    """Strictly increasing frame times: ``(phone_ns, None)`` when they already are, else the
+    repaired times and notes for the meta.
+
+    With strictly increasing ``pts_us`` (the glasses' own video timeline), each non-increasing
+    pair ``(i, i+1)`` marks the frame of the two that is further from ``pts_us * 1000 + offset``
+    (``offset`` = median of ``phone_ns - pts_us * 1000``), and marked frames get that prediction;
+    if that is still not increasing, every frame does. Without usable ``pts_us``: frames that do
+    not exceed every earlier time are dropped and re-interpolated over the frame index (the end
+    extrapolated with the median step)."""
+    phone = np.asarray(phone_ns, dtype=np.int64)
+    n = len(phone)
+    steps = np.diff(phone)
+    if n < 2 or np.all(steps > 0):
+        return phone.copy(), None
+    info: dict = {"non_increasing_steps": int(np.sum(steps <= 0))}
+    pts = np.asarray(pts_us, dtype=np.int64)
+    if len(pts) == n and np.all(np.diff(pts) > 0):
+        pred = pts * 1000 + int(np.median(phone - pts * 1000))
+        resid = np.abs(phone - pred)
+        bad = np.zeros(n, dtype=bool)
+        for i in np.flatnonzero(steps <= 0):
+            bad[i if resid[i] > resid[i + 1] else i + 1] = True
+        fixed = np.where(bad, pred, phone)
+        info["time_repair"] = "pts_us"
+        if not np.all(np.diff(fixed) > 0):
+            fixed, bad = pred, pred != phone
+            info["time_repair"] = "pts_us (all frames)"
+    else:
+        running = np.maximum.accumulate(phone)
+        keep = np.r_[True, phone[1:] > running[:-1]]
+        idx = np.flatnonzero(keep)
+        fixed = np.interp(np.arange(n), idx, phone[idx].astype(np.float64))
+        good_steps = np.diff(phone[idx])
+        step = float(np.median(good_steps)) if len(good_steps) else 1.0
+        tail = np.arange(n) > idx[-1]
+        fixed[tail] = phone[idx[-1]] + (np.arange(n)[tail] - idx[-1]) * step
+        fixed = np.round(fixed).astype(np.int64)
+        bad = ~keep
+        info["time_repair"] = "interpolation"
+    info["repaired_frames"] = int(np.sum(bad))
+    info["repaired_frame_indices"] = np.flatnonzero(bad)[:50].tolist()
+    return fixed.astype(np.int64), info
 
 
 def _imu_arrays(ep: Episode, icfg, t0: int) -> dict[str, np.ndarray]:

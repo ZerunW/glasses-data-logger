@@ -5,7 +5,10 @@ Inputs (only derived files, never ``gt/``): ``camera_traj.npz`` (head camera), `
 (21 mocap spheres per hand), ``arms.npz`` (shoulder/elbow/wrist mocap spheres; optional),
 ``objects/`` (one free body per object at its first valid pose, meshes, mass, friction) and
 ``objects/table.json`` (a box from the table top down to the floor; floor = top -
-``scene.table_height_m``). See :mod:`glassesdata_pipeline.sim.mjcf` for the names in the file.
+``scene.table_height_m``). Without a table, an inferred support box under the objects (top = their
+lowest resting bottom, ``scene.json`` ``table.support = "inferred"``), so they do not fall at the
+start. ``scene.json`` also records ``gravity_aligned`` (step ``world``; a warning when False).
+See :mod:`glassesdata_pipeline.sim.mjcf` for the names in the file.
 
 Robots are not part of ``scene.xml``; ``retarget``/``physics``/RL add them with
 :func:`glassesdata_pipeline.sim.mjcf.compose`.
@@ -26,11 +29,11 @@ from .. import geometry as geo
 from ..episode import Episode
 from ..errors import PipelineError
 from ..sim import mjcf, replay
-from ..sim.data import EpisodeData, ObjectData, load_episode_data
+from ..sim.data import EpisodeData, ObjectData, gravity_aligned, load_episode_data
 from ..sim.frames import fovy_deg
 
 NAME = "scene"
-VERSION = 1
+VERSION = 2  # 2: inferred support box without a table, gravity_aligned
 REQUIRES = ["world", "objects"]
 INPUTS = [
     "derived/camera.json", "derived/camera_traj.npz", "derived/hands_world.npz", "derived/arms.npz",
@@ -92,6 +95,19 @@ def object_spec(obj: ObjectData, k: int, density: float, friction: float) -> mjc
     )
 
 
+def support_box(objects: list[mjcf.ObjectSpec], floor_z: float, margin: float) -> mjcf.TableSpec | None:
+    """Without a measured table: a box whose top is the objects' lowest resting bottom (their
+    first valid poses), covering their footprints plus ``margin``, down to ``floor_z`` (or 5 cm
+    under the top when that is lower). None without objects."""
+    if not objects:
+        return None
+    corners = [geo.transform(o.pose, mjcf.box_mesh(o.size)[0]) for o in objects]
+    top = float(min(np.min(c[:, 2]) for c in corners))
+    box = mjcf.table_from_polygon(np.concatenate([c[:, :2] for c in corners]), top, top - min(floor_z, top - 0.05))
+    box.size_xy = box.size_xy + 2.0 * margin
+    return box
+
+
 def render_size(camera: geo.Camera | None, height: int) -> tuple[int, int]:
     if camera is None:
         return int(round(height * 9 / 16)) // 2 * 2, int(height) // 2 * 2
@@ -116,13 +132,22 @@ def scene_spec(ep: Episode, data: EpisodeData, scfg: Any) -> tuple[mjcf.SceneSpe
         table = mjcf.table_from_polygon(data.table_polygon, data.table_top_z, table_height)
         floor_z = table.floor_z
         notes["table"] = {"center_xy": table.center_xy.tolist(), "size_xy": table.size_xy.tolist(),
-                          "yaw_deg": math.degrees(table.yaw), "top_z": table.top_z, "floor_z": table.floor_z}
+                          "yaw_deg": math.degrees(table.yaw), "top_z": table.top_z, "floor_z": table.floor_z,
+                          "support": "measured"}
     else:
         cam_z = float(head[2, 3]) if head is not None else 0.0
-        bottoms = [float(np.min(geo.transform(o.pose, mjcf.box_mesh(o.size)[0])[:, 2])) for o in objects]
-        floor_z = min([cam_z - float(scfg.get("floor_below_camera_m", 1.45))] + bottoms)
-        notes["table"] = None
-        log.warning("no table (objects/table.json); floor at z = %.3f m", floor_z)
+        floor_z = cam_z - float(scfg.get("floor_below_camera_m", 1.45))
+        table = support_box(objects, floor_z, float(scfg.get("support_margin_m", 0.10)))
+        if table is None:
+            notes["table"] = None
+            log.warning("no table (objects/table.json) and no object; floor at z = %.3f m", floor_z)
+        else:
+            floor_z = table.floor_z
+            notes["table"] = {"center_xy": table.center_xy.tolist(), "size_xy": table.size_xy.tolist(),
+                              "yaw_deg": math.degrees(table.yaw), "top_z": table.top_z, "floor_z": table.floor_z,
+                              "support": "inferred"}
+            log.warning("no table (objects/table.json): an inferred support box under the objects, top at z = "
+                        "%.3f m (their lowest resting bottom)", table.top_z)
     hands: dict[str, np.ndarray | None] = {}
     arms: dict[str, np.ndarray | None] = {}
     valid = data.hand_valid()
@@ -157,6 +182,10 @@ def run(ep: Episode, cfg) -> dict:
     if data.T_world_cam is None:
         raise PipelineError("scene needs derived/camera_traj.npz (step world)")
     spec, notes = scene_spec(ep, data, scfg)
+    notes["gravity_aligned"] = gravity_aligned(ep)
+    if notes["gravity_aligned"] is False:
+        log.warning("scene: the world is not gravity-aligned (no IMU gravity): MuJoCo's gravity (-z) does not "
+                    "point down here; physics on this scene is inconclusive")
     sim_dir = ep.derived / "sim"
     info = mjcf.write_scene(spec, sim_dir)
     objects = []

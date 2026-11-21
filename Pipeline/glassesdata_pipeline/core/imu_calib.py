@@ -32,12 +32,15 @@ def visual_rates(t: ArrayLike, R: ArrayLike, valid: ArrayLike) -> tuple[NDArray[
     """Mean camera angular velocity (camera frame, rad/s) between consecutive valid frames.
 
     Returns ``(t0 (M,), t1 (M,), omega (M, 3), index (M,))`` for frame pairs ``(i, i+1)`` both
-    valid; ``omega = log(R_i^T R_{i+1}) / (t_{i+1} - t_i)``.
+    valid with ``t_{i+1} > t_i`` (pairs with a non-positive or non-finite time step are left
+    out); ``omega = log(R_i^T R_{i+1}) / (t_{i+1} - t_i)``.
     """
     t = np.asarray(t, dtype=np.float64)
     R = np.asarray(R, dtype=np.float64)
-    v = np.asarray(valid, dtype=bool) & np.all(np.isfinite(R), axis=(1, 2))
-    i = np.flatnonzero(v[:-1] & v[1:])
+    v = np.asarray(valid, dtype=bool) & np.all(np.isfinite(R), axis=(1, 2)) & np.isfinite(t)
+    with np.errstate(invalid="ignore"):
+        forward = np.diff(t) > 0
+    i = np.flatnonzero(v[:-1] & v[1:] & forward)
     if i.size == 0:
         return np.zeros(0), np.zeros(0), np.zeros((0, 3)), i
     dR = np.swapaxes(R[i], -1, -2) @ R[i + 1]

@@ -358,6 +358,17 @@ def build_task_model(m: Any, names: Mapping[str, Sequence[str]], scene: SceneNam
     )
 
 
+def apply_joint_limits(ref: DemoReference, tm: TaskModel) -> float:
+    """Clip the reference hand qpos to the joint limits and recompute the hand velocities from the
+    clipped positions (a clipped joint does not move); returns the largest violation."""
+    from .reference import hand_qvel_from_qpos
+
+    ref.hand_qpos, violation = clip_reference_to_limits(ref.hand_qpos, tm.hand_q_lo, tm.hand_q_hi)
+    if violation > 0:
+        ref.hand_qvel = hand_qvel_from_qpos(ref.hand_qpos, ref.dt, tm.hand_joints, len(tm.hand_vadr))
+    return violation
+
+
 def clip_reference_to_limits(hand_qpos: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> tuple[np.ndarray, float]:
     """Reference hand qpos clipped to the joint limits; also returns the largest violation (rad/m)."""
     q = np.asarray(hand_qpos, dtype=np.float64)
@@ -416,8 +427,9 @@ def mocap_offset(mujoco: Any, m: Any, root_body: int, mocap_body: int) -> tuple[
 
 def attach_kinematics(mujoco: Any, m: Any, tm: TaskModel, ref: DemoReference) -> DemoReference:
     """Fill ``base_pos``, ``base_quat``, ``tips_pos`` (forward kinematics of the reference) and
-    ``ctrl`` (actuator targets); clips the reference hand qpos to the joint limits first."""
-    ref.hand_qpos, violation = clip_reference_to_limits(ref.hand_qpos, tm.hand_q_lo, tm.hand_q_hi)
+    ``ctrl`` (actuator targets); clips the reference hand qpos to the joint limits first (and
+    recomputes the hand velocities, :func:`apply_joint_limits`)."""
+    violation = apply_joint_limits(ref, tm)
     if violation > 0.05:
         log.warning("reference hand qpos exceeds joint limits by up to %.3f (clipped)", violation)
     ref.info["limit_violation"] = violation

@@ -13,7 +13,8 @@ hand = "auto"              # human hand whose grasp flags count ("left"/"right")
 segment_s = [0.0, 0.0]     # [start, end] episode seconds to use; end <= start = the whole demo
 control_dt = 0.02          # policy period (s); physics substeps = round(control_dt / scene timestep)
 smooth_sigma_s = 0.02      # Gaussian smoothing of the resampled reference (s); 0 = off
-max_gap_s = 0.5            # warn when the hand/object reference has a longer gap (filled by interpolation)
+max_gap_s = 0.5            # hand/object gaps longer than this: no episode starts there, an episode ends there (time-out);
+                           # every gap is interpolated and earns no tracking reward
 lookahead_steps = 5        # observation shows the reference object at t+1 and t+k (k = this)
 max_episode_steps = 0      # cap on episode length in control steps; 0 = until the demo end
 min_episode_steps = 10     # random starts leave at least this many steps before the demo end

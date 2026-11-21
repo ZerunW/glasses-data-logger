@@ -180,6 +180,9 @@ def test_import_backend_frames_auto_scale(slam_rec, tmp_path):
     align.write_tum(path, keep.astype(float), poses[keep])
     p = slam.params(ep.config)
     p.update(backend="import", import_path=str(path), import_time="auto", import_scale="auto")
+    with pytest.raises(slam.PipelineError, match="set slam.import_time"):  # whole numbers, fewer than the frames
+        slam.run_import(ep, p)
+    p.update(import_time="frames")
     res = slam.run_import(ep, p)
     v = res["valid"]
     assert v[: keep[-1] + 1].all()                           # interpolated between keyframes
@@ -194,3 +197,39 @@ def test_import_backend_frames_auto_scale(slam_rec, tmp_path):
     assert res["valid"].all()
     rel = geo.inv_T(gt[0]) @ gt
     assert np.allclose(res["T_slam_cam"][:, :3, 3], rel[:, :3, 3], atol=1e-6)
+
+
+def test_import_time_units_offsets_and_the_deprecated_key(slam_rec, tmp_path, caplog):
+    ep = Episode(slam_rec)
+    gt = ep.gt["T_world_cam"]
+    n = len(gt)
+    path = tmp_path / "traj.txt"
+    p = slam.params(ep.config)
+    p.update(backend="import", import_path=str(path), import_scale=1.0)
+    # frames numbered from 1 (ffmpeg): one stamp per frame -> "auto" = frames; offset -1 aligns them
+    align.write_tum(path, np.arange(1, n + 1, dtype=float), gt)
+    assert slam.import_time_unit("auto", np.arange(1, n + 1, dtype=float), n) == "frames"
+    res = slam.run_import(ep, {**p, "import_time": "auto", "import_time_offset": -1})
+    rel = geo.inv_T(gt[0]) @ gt
+    assert res["valid"].all() and np.allclose(res["T_slam_cam"], rel, atol=1e-9)
+    shifted = slam.run_import(ep, {**p, "import_time": "frames", "import_time_offset": 0})
+    # without the offset every pose lands one frame early: frame 0 has none, frame 1 holds frame 0's pose
+    assert not shifted["valid"][0] and np.allclose(shifted["T_slam_cam"][1], np.eye(4), atol=1e-9)
+    assert not np.allclose(shifted["T_slam_cam"][5], res["T_slam_cam"][5], atol=1e-6)
+    # seconds with a non-zero offset (the tool's clock started 2.5 s before the video)
+    t = ep.timeline()["t"]
+    align.write_tum(path, t + 2.5, gt)
+    assert slam.import_time_unit("auto", t + 2.5, n) == "seconds"
+    res = slam.run_import(ep, {**p, "import_time": "auto", "import_time_offset": -2.5})
+    assert res["valid"].all() and np.allclose(res["T_slam_cam"], rel, atol=1e-9)
+    # ambiguous: whole seconds, not one per frame
+    with pytest.raises(slam.PipelineError, match="whole numbers"):
+        slam.import_time_unit("auto", np.arange(5, dtype=float), n)
+    with pytest.raises(slam.PipelineError, match="import_time must"):
+        slam.import_time_unit("minutes", np.arange(5, dtype=float), n)
+    # the old key still works, with a warning
+    q = slam.params({"slam": {"import_time_offset_s": -1.0, "import_time_offset": 0.0}})
+    assert q["import_time_offset"] == -1.0 and "import_time_offset_s" not in q
+    assert any("deprecated" in r.message for r in caplog.records)
+    with pytest.raises(slam.PipelineError, match="differ"):
+        slam.params({"slam": {"import_time_offset_s": -1.0, "import_time_offset": 2.0}})

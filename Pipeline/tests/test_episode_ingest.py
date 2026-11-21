@@ -142,3 +142,72 @@ def test_ingest_keeps_only_the_head_imu_by_default(recording_copy):
     assert len(tl["imu_t"]) == n_glasses + 20
     assert np.array_equal(tl["imu_is_glasses"], tl["imu_source"] == "glasses")
     assert (tl["imu_source"] == "neuralBand").sum() == 20
+
+
+def test_repair_frame_times():
+    from glassesdata_pipeline.steps.ingest import repair_frame_times
+
+    pts = 1_000_000 + np.arange(8) * 41_667
+    phone = 5_000_000_000 + pts * 1000 + np.array([0, 3, -2, 1, 0, 2, -1, 0]) * 1_000_000  # jitter (ms)
+    same, info = repair_frame_times(phone, pts)
+    assert info is None and np.array_equal(same, phone)
+    stall = phone.copy()
+    stall[3] = stall[2]  # a repeated stamp
+    fixed, info = repair_frame_times(stall, pts)
+    assert np.all(np.diff(fixed) > 0) and info["time_repair"] == "pts_us" and info["repaired_frames"] == 1
+    assert info["repaired_frame_indices"] == [3] and np.array_equal(np.delete(fixed, 3), np.delete(stall, 3))
+    late = phone.copy()
+    late[4] = phone[6] + 5_000_000  # one frame stamped far too late
+    fixed, info = repair_frame_times(late, pts)
+    assert np.all(np.diff(fixed) > 0) and info["repaired_frame_indices"] == [4]
+    assert abs(fixed[4] - phone[4]) < 3_000_000  # back near its true time
+    bad_pts = np.zeros(8, np.int64)  # no usable pts_us: monotone interpolation
+    fixed, info = repair_frame_times(late, bad_pts)
+    assert np.all(np.diff(fixed) > 0) and info["time_repair"] == "interpolation"
+    tail = phone.copy()
+    tail[-1] = tail[-2]
+    fixed, _ = repair_frame_times(tail, bad_pts)
+    assert np.all(np.diff(fixed) > 0)
+
+
+def test_ingest_repairs_non_increasing_frame_times(recording_copy, caplog):
+    lines = (recording_copy / "frames.csv").read_text().splitlines()
+    header = lines[0].split(",")
+    col = header.index("phone_time_ns")
+    cells = [line.split(",") for line in lines[1:]]
+    cells[10][col] = cells[9][col]  # frame 10 arrives with frame 9's stamp
+    (recording_copy / "frames.csv").write_text("\n".join([lines[0]] + [",".join(c) for c in cells]) + "\n")
+    ep = Episode(recording_copy)
+    assert Runner(ep).run(steps=["ingest"]).ok
+    tl = ep.timeline()
+    assert np.all(np.diff(tl["t"]) > 0) and abs(tl["t"][10] - 10 / 24) < 1e-3
+    assert tl["meta"]["time_repair"] == "pts_us" and tl["meta"]["repaired_frames"] == 1
+    assert "repaired 1 frame" in caplog.text
+
+
+def test_visual_rates_skip_non_positive_time_steps():
+    from glassesdata_pipeline import geometry as geo
+    from glassesdata_pipeline.core import imu_calib as ic
+
+    t = np.array([0.0, 0.1, 0.1, 0.3])
+    R = np.stack([geo.rot_z(0.1 * k) for k in range(4)])
+    t0, t1, w, idx = ic.visual_rates(t, R, np.ones(4, bool))
+    assert list(idx) == [0, 2] and np.all(np.isfinite(w)) and np.all(t1 > t0)
+    assert w[0] == pytest.approx([0, 0, 1.0]) and w[1] == pytest.approx([0, 0, 0.5])
+
+
+def test_frames_checks_the_timeline(recording_copy):
+    ep = Episode(recording_copy)
+    assert len(list(ep.frames(indices=[47]))) == 1  # no timeline yet: plain decoding
+    with pytest.raises(PipelineError, match="decodes to 48 frames"):
+        list(ep.frames(indices=[50]))
+    assert Runner(ep).run(steps=["ingest"]).ok
+    with pytest.raises(PipelineError, match="timeline has frames 0..47"):
+        list(ep.frames(indices=[48]))
+    tl = ep.timeline()
+    meta = tl.pop("meta")
+    ep.save_npz("timeline", meta, **{**tl, "t": tl["t"][:40]})  # a shorter timeline: frames beyond it are not decoded
+    assert [i for i, _ in ep.frames()][-1] == 39
+    ep.save_npz("timeline", meta, **{**tl, "t": np.r_[tl["t"], tl["t"][-1] + [0.04, 0.08]]})  # longer than the video
+    with pytest.raises(PipelineError, match="decodes to 48 frames but the timeline has 50"):
+        list(ep.frames())
