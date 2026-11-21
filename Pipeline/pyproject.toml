@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=65"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "glassesdata-pipeline"
+version = "0.1.0"
+description = "Offline pipeline for first-person Ray-Ban Meta recordings: hands, arms, head trajectory and objects in a gravity-aligned world, MuJoCo scenes and RL (see Docs/PIPELINE.md)."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "opencv-contrib-python>=4.10",
+    "av>=12",
+    "mediapipe>=0.10.14",
+    "pillow>=10",
+    "matplotlib>=3.8",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+# The heavy set (Linux + CUDA machine only); see requirements.txt for install notes.
+heavy = [
+    "torch>=2.4",
+    "transformers>=4.45",
+    "open3d>=0.18",
+    "trimesh>=4.4",
+    "coacd>=1.0",
+    "mujoco>=3.2",
+    "mujoco-warp",
+    "warp-lang>=1.5",
+    "mink>=0.0.5",
+    "rerun-sdk>=0.20",
+    "rsl-rl-lib>=2.3",
+]
+
+[project.scripts]
+glassesdata-pipeline = "glassesdata_pipeline.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["glassesdata_pipeline*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+# importlib mode: test files in tests/ and tests/core/ may share base names.
+addopts = "--import-mode=importlib"

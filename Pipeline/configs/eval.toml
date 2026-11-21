@@ -1,0 +1,13 @@
+# Evaluation against gt/ (python -m glassesdata_pipeline eval REC; PIPELINE.md section 9).
+[eval]
+# Depth pixels outside [depth_min_m, depth_max_m] (ground truth) are ignored.
+depth_min_m = 0.05
+depth_max_m = 10.0
+# Evaluate at most this many depth frames (evenly spaced); 0 = all.
+depth_max_frames = 0
+# Relative pose error frame gaps (24 = one second at 24 fps).
+rpe_deltas = [1, 24]
+# Hand joints count in camera-frame MPJPE only where the ground truth marks them visible.
+hands_visible_only = false
+# Write matplotlib PNGs into derived/eval/.
+plots = true

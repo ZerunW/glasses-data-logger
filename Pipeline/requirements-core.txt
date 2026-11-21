@@ -1,0 +1,9 @@
+# Core dependencies: everything that must import (and is tested) on the development Mac.
+# Python 3.11+. Configuration uses the standard library's tomllib (no PyYAML, no SciPy).
+numpy>=1.26                    # arrays everywhere
+opencv-contrib-python>=4.10    # image ops, PnP, ORB/SIFT, cv2.aruco (ChArUco); "contrib" for aruco
+av>=12                         # PyAV: decode video.mp4 (HEVC) and encode synthetic videos with libx265
+mediapipe>=0.10.14             # hands2d backend "mediapipe"
+pillow>=10                     # image I/O helpers
+matplotlib>=3.8                # static plots (eval, viz)
+pytest>=8                      # tests

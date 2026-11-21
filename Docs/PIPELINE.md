@@ -104,10 +104,14 @@ used for anything not measured; `measured` says which values the user entered.
 Hand bone lengths are derived from `hand_length_m` with the Buchholz et al. (1992) segment ratios
 (fraction of hand length; verify against the paper before relying on them):
 thumb MC 0.251, PP 0.196, DP 0.158; index MC 0.374, PP 0.265, MP 0.143, DP 0.097; middle MC 0.373,
-PP 0.277, MP 0.170, DP 0.108; ring MC 0.336, PP 0.259, MP 0.165, DP 0.107; little MC 0.295,
+PP 0.277, MP 0.170, DP 0.108; ring MC 0.336, PP 0.259, MP 0.165, DP 0.107; pinky MC 0.295,
 PP 0.206, MP 0.117, DP 0.093. The thumb CMC joint is placed from the wrist by a fixed template
 offset. Palm width rescales the lateral spacing of the MCP joints. `skeleton.py` implements this and
-returns a canonical 21×3 rest pose (wrist at origin) plus the 20 bone lengths.
+returns a canonical 21×3 rest pose (wrist at origin) plus the 20 bone lengths. The metacarpal
+ratios measure CMC→MCP, so a carpal offset of 0.072 L is added to the wrist→MCP bones (5, 9, 13,
+17); a straight middle finger then spans exactly L. `palm_length_m` is stored but not used yet.
+Canonical hand frame: wrist at the origin, +y towards the middle MCP, +z palmar, +x towards the
+thumb for the right hand; the left hand is the mirror image (x negated).
 
 ## 5. Derived files (`<recording>/derived/`)
 
@@ -126,12 +130,12 @@ output has the same object under the key `"meta"`. `inputs` maps each input file
 | | `depth/index.npz` | `frames[F]` (video frame indices that have depth), `scale` (= h / H) |
 | `hand3d` | `hand3d.npz` | `joints_cam[T,2,21,3]`, `valid[T,2]`, `reproj_px[T,2]`, `depth_scale[T]` (raw ratio hand-metric / depth-model, NaN when unknown), `depth_scale_smooth[T]` |
 | `slam` | `slam.npz` | `T_slam_cam[T,4,4]` (first valid frame = identity, metric), `valid[T]`, `inliers[T]`, `is_keyframe[T]`, `source` str |
-| `imu` | `imu.npz` | `R_cam_imu[3,3]`, `time_offset_s` (IMU time = video time + offset), `gyro_bias[3]`, `accel_scale` (to m/s²), `gravity_cam[T,3]` (unit, pointing down, camera frame), `R_world_slam[3,3]`, `quality` json |
+| `imu` | `imu.npz` | `R_cam_imu[3,3]`, `time_offset_s` (IMU time = video time + offset), `gyro_bias[3]` (IMU frame, rad/s), `accel_scale` (to m/s²), `gravity_cam[T,3]` (unit, pointing down, camera frame), `R_world_slam[3,3]`, `quality` json |
 | `world` | `camera_traj.npz` | `T_world_cam[T,4,4]`, `valid[T]` |
 | | `hands_world.npz` | `joints[T,2,21,3]` (smoothed), `raw[T,2,21,3]`, `observed[T,2]`, `filled[T,2]`, `bone_lengths[2,20]` |
 | `arms` | `arms.npz` | `shoulder[T,2,3]`, `elbow[T,2,3]`, `wrist[T,2,3]`, `elbow_conf[T,2]`, `method[T,2]` int8 (0 none, 1 forearm cue, 2 prior only) |
 | `objects` | `objects/index.json` | `[{"id": "obj0", "prompt": {...}, "first_frame": i, "last_frame": j}]` |
-| | `objects/<id>/masks.npz` | `frames[F]`, `packed[F, ...]` (`np.packbits` of bool masks at depth resolution), `shape` |
+| | `objects/<id>/masks.npz` | `frames[F]`, `packed[F, ...]` (`np.packbits` of the flattened row-major bool mask at depth resolution; see `groundtruth.pack_mask`), `shape` |
 | | `objects/<id>/mesh.obj` | visual mesh in the object frame (origin at the centroid) |
 | | `objects/<id>/collision/part_*.obj` | convex parts (convex hull when decomposition is unavailable) |
 | | `objects/<id>/poses.npz` | `T_world_obj[T,4,4]`, `valid[T]`, `fitness[T]`, `grasped[T,2]` |
@@ -142,9 +146,12 @@ output has the same object under the key `"meta"`. `inputs` maps each input file
 | `retarget` | `retarget_<robot>.npz` | `qpos[T,nq]`, `joint_names`, `err_m[T]`, `robot` |
 | `physics` | `physics.json` | per-object deviation of simulated vs reconstructed trajectory, plausibility score |
 | `viz` | `viz/episode.rrd`, `viz/*.png` | Rerun recording; static matplotlib figures |
-| `eval` | `eval.json`, `eval.md`, `eval/*.png` | metrics against `gt/` or against the ChArUco board |
+| `eval` (CLI command, not a runner step) | `eval.json`, `eval.md`, `eval/*.png` | metrics against `gt/` or against the ChArUco board |
 
 Depth maps are large: at `downsample = 4` a 720×1280 frame is 180×320 float16 (115 kB).
+Downsampled grid sizes are rounded (`geometry.downsample_size`); a resized camera follows OpenCV's
+pixel-centre convention `cx' = (cx + 0.5)·s − 0.5`. JSON outputs that are lists (for example
+`objects/index.json`) carry no `meta`; the runner then keeps its record in `derived/_runs/<step>.json`.
 
 ## 6. Configuration
 
@@ -160,13 +167,13 @@ Backends are chosen per step, for example `hands2d.backend = "mediapipe" | "wilo
 `depth.backend = "depth_anything_v2" | "video_depth_anything" | "gt"`,
 `slam.backend = "builtin" | "import"` (with `slam.import_path` to a TUM-format trajectory from
 MegaSaM / DROID-SLAM / MASt3R-SLAM), `objects.mask_backend = "sam2" | "gt"`. The `gt` backends exist
-only for synthetic recordings: they read `gt/` and add configurable noise.
+only for synthetic recordings: they read `gt/` and add the noise configured in `[synth.gt_noise]`.
 
 ## 7. Code layout and APIs
 
 ```
 Pipeline/
-  configs/default.toml
+  configs/<section>.toml   one file per config section (§6)
   requirements.txt, requirements-core.txt
   scripts/setup_ubuntu.sh, scripts/omen_smoke.sh
   glassesdata_pipeline/

@@ -1,0 +1,35 @@
+# Full install for the Ubuntu 24.04 + NVIDIA CUDA machine (PIPELINE.md section 0).
+# Nothing here is installed on the development Mac; only requirements-core.txt is needed there.
+#
+# CUDA notes:
+# * Install PyTorch from the CUDA wheel index that matches the driver FIRST, e.g.
+#     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+#   then `pip install -r requirements.txt` (pip keeps the CUDA build).
+# * mujoco-warp and warp-lang need an NVIDIA GPU with a CUDA 12 driver.
+# * PyAV wheels bundle FFmpeg; check `python -c "import av; print('libx265' in av.codecs_available)"`
+#   if you want to write synthetic recordings on Linux (decoding HEVC works regardless).
+-r requirements-core.txt
+
+# --- learned models -------------------------------------------------------------------------
+torch>=2.4                     # GPU tensors for every learned backend (see the CUDA note above)
+transformers>=4.45             # Depth Anything V2 (depth backend "depth_anything_v2") from Hugging Face
+# Not on PyPI as plain packages; install from source when the backend is used:
+#   WiLoR / HaMeR (hands2d / hand3d backends "wilor", "hamer"):  git clone + pip install -e . (needs CUDA)
+#   SAM 2 (objects.mask_backend "sam2"):  pip install "git+https://github.com/facebookresearch/sam2.git"
+#   Video Depth Anything (depth backend "video_depth_anything"): git clone + weights download
+#   Model weights are downloaded by each backend into ~/.cache (never into the repo).
+
+# --- geometry, meshes, reconstruction ---------------------------------------------------------
+open3d>=0.18                   # point clouds, TSDF fusion, ICP for object poses
+trimesh>=4.4                   # mesh I/O, convex hulls, mass properties (objects, scene)
+coacd>=1.0                     # convex decomposition for collision meshes (falls back to the hull)
+
+# --- simulation, retargeting, RL ----------------------------------------------------------------
+mujoco>=3.2                    # MJCF scene, kinematic replay, physics plausibility check
+mujoco-warp                    # GPU-batched MuJoCo for RL (CUDA)
+warp-lang>=1.5                 # NVIDIA Warp, required by mujoco-warp (CUDA)
+mink>=0.0.5                    # differential IK for hand/arm retargeting to robots
+rsl-rl-lib>=2.3                # PPO training (rl/)
+
+# --- visualisation ------------------------------------------------------------------------------
+rerun-sdk>=0.20                # viz/episode.rrd recordings

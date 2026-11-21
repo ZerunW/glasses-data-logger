@@ -1,0 +1,12 @@
+# Step "ingest": frames.csv + motion.csv + video.mp4 -> derived/timeline.npz, camera.json,
+# profile.json (PIPELINE.md section 5). IMU values are stored raw; units are handled by "imu".
+[ingest]
+# Count the frames of video.mp4 by demuxing (no decoding). T = min(video frames, frames.csv rows);
+# a mismatch is logged. Set false to trust frames.csv (faster on very long recordings).
+count_video_frames = true
+# Keep motion.csv rows from these sources ("glasses", "phone"); imu_is_glasses marks the source.
+imu_sources = ["glasses", "phone"]
+# Drop IMU rows whose phone_time_ns repeats the previous row of the same source.
+drop_duplicate_imu = true
+# Warn when consecutive glasses IMU samples are further apart than this (seconds).
+imu_gap_warn_s = 0.1

@@ -1,0 +1,52 @@
+# Synthetic recordings: python -m glassesdata_pipeline synth OUT [--seconds] [--seed] [--size]
+# [--draw-hands] (flags override these values). PIPELINE.md section 8.
+[synth]
+seconds = 8.0                # clip length
+fps = 24                     # video frame rate (the glasses record 24 or 30 fps)
+size = "360x640"             # WIDTHxHEIGHT, portrait 9:16 (720x1280 is the glasses' .high size)
+seed = 0                     # scene textures, motion phases, noise
+hfov_deg = 65.0              # horizontal field of view of the synthetic camera
+dist = [-0.05, 0.01, 0.0, 0.0, 0.0]  # OpenCV pinhole k1 k2 p1 p2 k3, written to calibration.json
+draw_hands = false           # paint hands and arms as skin/sleeve capsules (occlude the scene)
+table_height_m = 0.75        # table top above the floor
+crf = 16                     # x265 constant rate factor (lower = better quality, bigger file)
+preset = "fast"              # x265 preset
+gop = 24                     # keyframe interval in frames (no B-frames)
+visibility_tolerance_m = 0.01  # a joint is occluded when the scene depth is closer by more than this
+verify = true                # decode video.mp4 after writing; check frame count and PSNR
+
+# Body profile of the synthetic person (differs from the defaults on purpose so that a pipeline
+# that ignores profile.json shows up in the evaluation). Missing keys take the section-4 defaults.
+[synth.profile]
+hand_length_m = 0.195
+palm_width_m = 0.088
+forearm_length_m = 0.27
+upper_arm_length_m = 0.31
+shoulder_width_m = 0.40
+
+[synth.imu]
+rate_hz = 60.0               # glasses IMU sample rate
+time_offset_s = 0.02         # IMU time = video time + offset (an IMU sample stamped t measures time t - offset)
+padding_s = 0.3              # IMU samples before the first and after the last video frame
+gyro_noise = 0.004           # rad/s, white noise per sample
+accel_noise = 0.008          # g, white noise per sample
+gyro_bias = [0.012, -0.008, 0.005]    # rad/s, IMU frame
+accel_bias = [0.015, -0.010, 0.020]   # g, IMU frame
+# R_cam_imu = permutation @ exp(misalignment): v_cam = R_cam_imu @ v_imu.
+permutation = [[0.0, -1.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]]
+misalignment_deg = [2.0, -1.5, 3.0]   # axis-angle, degrees
+
+# Noise of the ground-truth backends (glassesdata_pipeline.backends.gt), used when a step selects
+# backend = "gt" on a synthetic recording.
+[synth.gt_noise]
+seed = 0                     # random generator seed for the noise below
+hands2d_sigma_px = 2.0       # Gaussian pixel noise on projected joints
+hands2d_dropout = 0.05       # probability that a hand is missed in a frame
+hands2d_score = 0.9          # keypoint and hand score of detected hands
+hands2d_min_visible = 6      # a hand with fewer visible joints is not detected
+mp_world_sigma_m = 0.003     # noise of the MediaPipe-style hand-centred landmarks (NaN when < 0)
+depth_scale = 1.10           # global scale error of the depth "model"
+depth_drift = 0.05           # amplitude of a slow multiplicative drift (sinusoid)
+depth_drift_period_s = 6.0   # period of that drift
+depth_noise = 0.03           # per-pixel multiplicative Gaussian noise (fraction)
+mask_min_pixels = 1          # frames where an object covers fewer pixels are left out of its masks

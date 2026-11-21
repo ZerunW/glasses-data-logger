@@ -1,0 +1,8 @@
+# Camera model used when a recording has no calibration.json (PIPELINE.md section 3).
+# Every result computed with it is marked calibration = "default".
+[camera]
+# Horizontal field of view guess, degrees, across the width of the stored (portrait) video
+# frame. A guess for Ray-Ban Meta at 720x1280; calibrate with the receiver's ChArUco page.
+hfov_deg = 65.0
+# "pinhole" (no distortion is assumed for the default camera).
+model = "pinhole"
