@@ -1,0 +1,39 @@
+# Step "imu": camera-IMU rotation, time offset, gyro bias, gravity -> derived/imu.npz
+# (PIPELINE.md section 5; method in glassesdata_pipeline/steps/imu.py).
+[imu]
+use_phone_imu = false        # without glasses IMU, use the phone's (NOT rigidly attached to the head)
+accel_units = "auto"         # "auto" (median norm ~1 -> g, ~9.8 -> m/s^2), "g" or "m/s2"
+gyro_units = "auto"          # "rad/s", "deg/s" or "auto" (ratio to the visual rotation rate)
+
+# ---- time offset (IMU time = video time + offset)
+max_offset_s = 0.2           # search range of the rate-norm cross-correlation
+offset_rate_hz = 200.0       # resampling rate of that correlation
+refine_window_s = 0.02       # then refine +- this around it on the vector residual ...
+refine_step_s = 0.0005       # ... on this grid (+ parabola)
+fixed_time_offset_s = 0.0    # used when there is no usable slam trajectory
+
+# ---- rotation extrinsic and gyro bias
+extrinsic = "estimate"       # "estimate" (Kabsch + Huber, alternating with the bias) or "fixed"
+R_cam_imu = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]  # v_cam = R_cam_imu @ v_imu (extrinsic = "fixed")
+huber_rad_s = 0.1            # Huber threshold of the rate residuals (rad/s)
+min_rate_pairs = 20          # fewer valid consecutive slam frames = no visual calibration
+bias_window_s = 0.5          # still-period gyro bias: window length ...
+bias_gyro_thresh = 0.05      # ... |gyro| below this (rad/s) ...
+bias_acc_thresh = 0.3        # ... and ||acc| - g| below this (m/s^2)
+min_still_fraction = 0.2     # use the still-period bias only when still windows cover this much of the clip
+
+# ---- gravity
+accel_bias = "estimate"      # "estimate" (with gravity, by preintegration) or "none"
+preint_window_s = 0.5        # frame-triplet span of the preintegration equations
+preint_substeps = 8          # integration grid points per video frame
+preint_max_g_error = 0.5     # accept the preintegration gravity when ||g| - 9.81| < this x 9.81 (unconstrained fit)
+preint_fix_g_norm = true     # impose |g| = 9.81 m/s^2 in the final fit
+preint_bias_sigma = 0.5      # zero-mean prior on each accelerometer bias component (m/s^2) ...
+preint_eq_sigma = 0.1        # ... relative to this noise of one preintegration equation (m/s^2)
+gravity_world = "preintegration"  # R_world_slam from "preintegration" or "mahony" (mean of the per-frame gravity)
+gravity_cam = "mahony"       # per-frame gravity: "mahony" (IMU attitude filter) or "slam" (R_slam_cam^T g_slam)
+compensate_linear_acc = true # subtract the slam linear acceleration from the accelerometer before Mahony
+linear_acc_half_window = 3   # frames on each side of the local quadratic fit of slam positions
+mahony_kp = 1.0              # Mahony proportional gain (1/s)
+mahony_ki = 0.0              # Mahony integral gain (1/s^2; the bias is removed beforehand)
+mahony_bidirectional = true  # run the filter forward and backward and average (offline, no lag)

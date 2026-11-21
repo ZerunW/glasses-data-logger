@@ -1,0 +1,66 @@
+# Step "slam": metric camera trajectory (visual only) -> derived/slam.npz (PIPELINE.md section 5).
+# Algorithm and the import backend: glassesdata_pipeline/steps/slam.py (module docstring).
+[slam]
+backend = "builtin"          # "builtin" (KLT + depth keyframes + pose graph) or "import" (TUM file)
+
+# ---- image processing
+downsample = 0               # process frames downsampled by this integer; 0 = auto (width <= auto_width)
+auto_width = 400             # auto: 720 px wide -> 2, 360 px -> 1
+border_px = 8                # ignore features this close to the image border (processing grid px)
+hand_margin_px = 10.0        # dilate the hand masks (convex hull of hands2d keypoints) by this (grid px)
+hand_forearm = 1.6           # extend each hand mask along the forearm by this x wrist-to-middle-knuckle length (0 = off)
+
+# ---- features and tracking
+max_features = 500           # tracked corners per keyframe (GFTT)
+min_distance_px = 7.0        # minimum distance between corners (grid px)
+cell_px = 32                 # re-detection grid: new corners only in cells holding fewer than per_cell
+per_cell = 5
+gftt_quality = 0.005         # GFTT quality level (relative to the strongest corner)
+klt_window = 21              # pyramidal Lucas-Kanade window (px) and pyramid levels
+klt_levels = 3
+fb_thresh_px = 0.8           # forward-backward check: drop tracks that do not return within this (px)
+
+# ---- depth lifting (depth/depth_f16.npy x hand3d.depth_scale_smooth)
+depth_median = 3             # median filter of the depth before sampling (3 or 5; 0 = off)
+depth_edge_rel = 0.08        # reject samples near depth edges: max/min over the window > 1 + this
+depth_edge_median = 5        # the edge test runs on a median-5 copy (pixel noise is not an edge)
+depth_edge_window = 3        # neighbourhood of the edge test (depth-grid px)
+min_depth_m = 0.15           # landmarks outside [min_depth_m, max_depth_m] are not used
+max_depth_m = 8.0
+
+# ---- pose per frame (PnP against the current keyframe)
+pnp_thresh_px = 1.5          # RANSAC / inlier threshold, processing-grid px (converted to normalized units)
+pnp_iterations = 300         # RANSAC iterations
+min_inliers = 20             # fewer inliers = tracking lost for this frame
+max_step_m = 0.25            # reject a pose that jumps further than this from the previous valid pose
+
+# ---- keyframes
+kf_min_inliers = 100         # new keyframe when the inliers drop below this ...
+kf_track_ratio = 0.55        # ... or below this fraction of the keyframe's landmarks ...
+kf_rotation_deg = 8.0        # ... or the camera turned more than this since the keyframe ...
+kf_translation_rel = 0.06    # ... or moved more than this x the keyframe's median landmark depth
+
+# ---- pose graph over keyframes
+orb_features = 1000          # ORB features per keyframe (edges to older keyframes, relocalisation)
+edge_back = 5                # try ORB edges to this many previous keyframes (both directions)
+edge_min_inliers = 30        # accept an ORB edge with at least this many PnP inliers ...
+edge_min_ratio = 0.3         # ... and this fraction of its matches
+edge_max_rot_deg = 5.0       # ... that agrees with the odometry within these bounds
+edge_max_trans_m = 0.10
+sigma_rot = 0.01             # edge information: rotation sigma = sigma_rot / sqrt(inliers) (rad)
+sigma_trans = 0.02           # translation sigma = sqrt(sigma_trans^2 / inliers + (scale_rel * |t|)^2) (m)
+scale_rel = 0.02             # relative depth-scale error of one keyframe (does not shrink with more points)
+pg_iterations = 30           # Levenberg-Marquardt iterations
+pg_huber = 3.0               # Huber threshold on the edge Mahalanobis norm
+
+# ---- tracking loss
+reloc_keyframes = 5          # relocalise by ORB matching against this many recent keyframes
+max_lost_frames = 12         # after this many lost frames start a new keyframe at the last valid pose
+
+# ---- backend "import" (MegaSaM / DROID-SLAM / MASt3R-SLAM trajectory, TUM format, camera-to-world)
+import_path = ""             # absolute, or relative to the recording folder
+import_time = "auto"         # "seconds" (episode seconds), "frames" (video frame indices) or "auto"
+import_time_offset_s = 0.0   # added to the stamps, in their unit (seconds, or frames when import_time = "frames")
+import_max_dt_s = 0.0        # nearest-stamp association tolerance (0 = half a frame)
+import_max_gap_s = 0.5       # interpolate frames between stamps at most this far apart (keyframe-only files)
+import_scale = "auto"        # number (multiplies translations) or "auto" = Sim(3) scale to the builtin trajectory

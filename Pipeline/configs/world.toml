@@ -1,0 +1,23 @@
+# Step "world": gravity-aligned camera trajectory (camera_traj.npz) and smoothed metric hands in the
+# world (hands_world.npz). PIPELINE.md section 5; glassesdata_pipeline/steps/world.py.
+[world]
+# RTS smoother per hand (core.smoothing.rts_smooth, constant acceleration per coordinate).
+# Grid search on an 8 s synthetic clip with ~1 cm hand3d noise: MPJPE 4.5-4.9 mm for
+# q_accel 5-20, r_meas 2e-5..8e-5, gate 9-25 (raw 10.2 mm); q_accel >= 150 follows the noise.
+q_accel = 20.0               # white-jerk spectral density (m^2/s^5): larger = follows faster motion, smooths less
+r_meas = 5e-5                # joint measurement variance (m^2): about (per-coordinate hand3d error)^2
+gate_chi2 = 16.0             # reject samples beyond sqrt(gate_chi2) predicted standard deviations (both directions)
+max_gap_s = 0.5              # bridge gaps up to this long; longer gaps stay NaN
+init_var = [1e-2, 1.0, 10.0] # initial position / velocity / acceleration variances
+min_observed_joints = 0.5    # a hand counts as observed when this fraction of its joints passed the gate
+max_reject_fraction = 0.2    # gate rejects more of a hand's samples than this -> motion too fast for q_accel:
+q_ladder_factor = 10.0       # ... smooth that hand again with q_accel x this ...
+q_ladder_steps = 2           # ... at most this many times
+
+# Bone-length refinement (core.smoothing.refine_bone_lengths) after smoothing.
+refine_bones = true
+bone_lengths = "profile"     # "profile" (profile.json, Buchholz ratios) or "data" (median of the raw hand)
+w_data = 1.0                 # weight of the smoothed joints
+w_bone = 100.0               # weight of the bone-length terms
+w_smooth = 0.1               # weight of the second-difference (acceleration) term
+bone_iters = 10              # ADMM iterations

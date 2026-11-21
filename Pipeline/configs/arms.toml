@@ -1,0 +1,41 @@
+# Step "arms": shoulders, elbows, wrists in the world -> derived/arms.npz (PIPELINE.md section 5;
+# glassesdata_pipeline/steps/arms.py).
+[arms]
+torso_yaw_tau_s = 1.0        # torso yaw = head yaw low-passed (zero phase) with this time constant; 0 = head yaw
+                             # (the synthetic ground truth uses the instantaneous head yaw)
+prior_swivel_deg = 20.0      # prior elbow swivel (skeleton.elbow_from_swivel: 0 = lowest, + = outward)
+cue = "region"               # forearm cue: "none", "gt" (synthetic only), "skin", "region" (sleeves too), "depth"
+cue_min_conf = 0.3           # drop image cues below this confidence
+cue_downsample = 0           # image cue grid downsampling; 0 = auto (width ~ cue_auto_width)
+cue_auto_width = 360
+cue_use_depth = true         # use depth continuity in "skin"/"region" when derived/depth exists
+w_cue = 1.0                  # core.elbow.solve_elbow weights: cue plane (+ side) ...
+w_prior = 0.2                # ... prior swivel ...
+w_smooth = 2.0               # ... and temporal smoothness of the swivel
+n_samples = 360              # swivel angles per frame
+max_swivel_speed = 6.0       # rad/s; transition band of the Viterbi solver
+gt_cue_sigma_px = 2.0        # cue = "gt": pixel noise on the wrist and forearm points
+gt_cue_min_len_px = 15.0     # cue = "gt": shortest visible forearm (px)
+seed = 0                     # cue = "gt": noise seed
+
+# core.forearm_cue.CueParams (image cues)
+[arms.forearm]
+wedge_deg = 55.0             # half opening of the search wedge around "away from the fingers"
+reach = 3.0                  # wedge length in wrist-to-knuckle distances (when the wrist depth is unknown)
+reach_forearm = 1.05         # wedge length in expected forearm lengths (f * forearm_length / wrist depth)
+hand_dilate = 0.12           # hand hull dilation (wrist-to-knuckle units)
+seed_from = 0.25             # region seeds along the wedge axis (wrist-to-knuckle units)
+seed_to = 0.6
+min_extent = 0.6             # shortest accepted axis (wrist-to-knuckle units)
+full_length = 0.5            # extent (fraction of the wedge length) with full length confidence
+far_quantile = 0.95          # far end of the axis = this quantile of the region's projections
+cr = [133.0, 175.0]          # "skin": YCrCb Cr and Cb ranges
+cb = [77.0, 130.0]
+skin_wrist_radius = 0.35     # "skin": the skin region must reach this close to the wrist (wrist-to-knuckle units)
+lab_step = 5.0               # "region": flood-fill tolerance between neighbouring pixels (Lab)
+canny = [40.0, 110.0]        # "region": Canny thresholds of the edge barriers
+depth_step_rel = 0.03        # depth continuity: relative tolerance between neighbouring pixels
+max_fill = 0.85              # a region filling more of the wedge than this is a leak (confidence falls)
+edge_fraction = 0.06         # more of the region on the image border than this = truncated (confidence 0 at 2x)
+wrist_border = 0.5           # wrist closer to the image border than this (wrist-to-knuckle units) lowers the confidence
+min_pixels = 25
