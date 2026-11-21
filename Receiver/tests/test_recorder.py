@@ -175,7 +175,9 @@ def test_a_recording_gets_a_copy_of_the_calibration_and_the_profile(tmp_path, pl
     recording.close()
     folder = recording.directory
     assert json.loads((folder / "calibration.json").read_text()) == calibration
-    assert (folder / "profile.json").read_bytes() == (tmp_path / "state" / "profile.json").read_bytes()
+    profile = json.loads((folder / "profile.json").read_text())  # the validated measurements, in the section-4 format
+    assert profile["hand_length_m"] == 0.2 and profile["measured"]["hand_length_m"] is True
+    assert profile["palm_width_m"] == 0.084 and profile["measured"]["palm_width_m"] is False
     info = json.loads((folder / "info.json").read_text())
     assert info["calibration"] == {"file": "calibration.json", "model": "pinhole", "width": 540, "height": 960, "rms_px": 0.3,
                                    "created": "2026-11-21T03:00:00Z", "source": "charuco-web"}
@@ -215,4 +217,94 @@ def test_without_calibration_or_profile_nothing_is_copied_and_info_says_so(tmp_p
     recording = Recording(tmp_path / "out", fmt, {}, setup_dir=tmp_path / "state")
     recording.close()
     assert not (recording.directory / "calibration.json").exists()
-    assert "not a valid calibration" in json.loads((recording.directory / "info.json").read_text())["calibration"]["note"]
+    assert "not valid JSON" in json.loads((recording.directory / "info.json").read_text())["calibration"]["note"]
+
+
+@pytest.mark.parametrize("bad, reason", [
+    ({}, "width and height"), ({"width": 720, "height": 1280, "K": []}, "3x3"),
+    ({"width": 720, "height": 1280, "K": [[0, 0, 1], [0, 500, 1], [0, 0, 1]]}, "focal lengths"),
+    ({"width": 720, "height": 1280, "K": [[500, 0, 1], [0, 500, 1], [0, 0, 1]], "dist": [1, 2, 3]}, "dist"),
+    ({"width": 720, "height": 1280, "K": [[500, 0, 1], [0, 500, 1], [0, 0, 1]], "model": "orthographic"}, "unknown model"),
+    ({"width": 0, "height": 1280, "K": [[500, 0, 1], [0, 500, 1], [0, 0, 1]]}, "width and height"),
+    ([1, 2], "not a JSON object"),
+])
+def test_a_malformed_calibration_is_not_copied_and_info_says_why(tmp_path, plant, bad, reason):
+    fmt, _ = plant
+    write_setup(tmp_path / "state")
+    (tmp_path / "state" / "calibration" / "current.json").write_text(json.dumps(bad))
+    recording = Recording(tmp_path / "out", fmt, {}, setup_dir=tmp_path / "state")
+    recording.close()
+    assert not (recording.directory / "calibration.json").exists()
+    info = json.loads((recording.directory / "info.json").read_text())
+    assert info["calibration"]["file"] is None and reason in info["calibration"]["note"]
+    assert info["profile"]["file"] == "profile.json"  # the other file is unaffected
+
+
+def test_one_failed_copy_leaves_the_other_files_entry_alone(tmp_path, plant, monkeypatch):
+    fmt, _ = plant
+    write_setup(tmp_path / "state")
+    from glassesdata_receiver import bodyprofile
+
+    def broken_save(path, profile):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(bodyprofile, "save", broken_save)
+    recording = Recording(tmp_path / "out", fmt, {}, setup_dir=tmp_path / "state")
+    recording.close()
+    info = json.loads((recording.directory / "info.json").read_text())
+    assert info["calibration"]["file"] == "calibration.json" and (recording.directory / "calibration.json").is_file()
+    assert info["profile"] == {"file": None, "note": "could not copy the body measurements: No space left on device"}
+
+
+def test_implausible_stored_measurements_are_not_reported_as_measured(tmp_path, plant):
+    fmt, _ = plant
+    state = tmp_path / "state"
+    state.mkdir()
+    (state / "profile.json").write_text(json.dumps({"version": 1, "hand_length_m": 1.9, "forearm_length_m": 0.27,
+                                                   "measured": {"hand_length_m": True, "forearm_length_m": True}}))
+    recording = Recording(tmp_path / "out", fmt, {}, setup_dir=state)
+    recording.close()
+    info = json.loads((recording.directory / "info.json").read_text())
+    assert info["profile"]["measured"] == ["forearm_length_m"] and "hand length" in info["profile"]["note"]
+    copied = json.loads((recording.directory / "profile.json").read_text())
+    assert copied["hand_length_m"] == 0.187 and copied["measured"]["hand_length_m"] is False
+
+
+def test_a_failed_close_is_recorded_as_such_not_as_complete(tmp_path, plant, monkeypatch):
+    fmt, packets = plant
+    recording = Recording(tmp_path, fmt, {})
+    for index, packet in enumerate(packets[:20]):
+        recording.write_video(packet, index)
+
+    real = recording._container
+
+    class FullDisk:  # the muxer's final write fails
+        def close(self):
+            real.close()
+            raise OSError(28, "No space left on device")
+
+    recording._container = FullDisk()
+    with pytest.raises(OSError):
+        recording.close()
+    info = json.loads((recording.directory / "info.json").read_text())
+    assert "No space left on device" in info["closeError"]
+    assert "endedMacTimeNs" not in info and "framesWritten" not in info
+    from glassesdata_receiver import web
+
+    entry = web.list_recordings(tmp_path)[0]
+    assert entry["state"] == "interrupted" and "No space left" in entry["error"]
+
+
+def test_info_json_is_written_atomically(tmp_path, plant, monkeypatch):
+    fmt, _ = plant
+    recording = Recording(tmp_path, fmt, {"link": "test"})
+    before = (recording.directory / "info.json").read_text()
+
+    def crash(source, target):
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(recorder.os, "replace", crash)
+    with pytest.raises(OSError):
+        recording.close()
+    assert (recording.directory / "info.json").read_text() == before  # the old file stays whole
+    assert [path.name for path in recording.directory.iterdir() if path.name.endswith(".tmp")] == []

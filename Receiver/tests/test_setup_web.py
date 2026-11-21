@@ -249,3 +249,71 @@ def test_the_page_has_the_setup_views_and_the_lag_indicator(server):
         assert text in page, text
     for key in PIPELINE_KEYS[:6]:  # every measurement has its place in the drawing
         assert f'data-m="{key}"' in page
+
+
+# ---------------------------------------------------------------- review fixes
+
+
+def test_a_malformed_current_calibration_does_not_break_the_page(server):
+    _, base, state = server
+    (state / "calibration").mkdir(parents=True)
+    for text in ("{}", '{"K": []}', "[]", "{oops"):
+        (state / "calibration" / "current.json").write_text(text)
+        status, _, body = request(base + "/api/calibration")
+        data = json.loads(body)
+        assert status == 200 and data["current"] is None and "not used" in data["current_note"], text
+
+
+def test_a_board_beyond_the_caps_is_refused(server):
+    _, base, _ = server
+    code, answer = post(base, "/api/calibration/start", body({"css_px_per_mm": 13, "device_pixel_ratio": 2, "area_css": [1240, 940]}))
+    assert code == 400 and "device pixels per mm" in answer["message"]
+    code, answer = post(base, "/api/calibration/start", body({"css_px_per_mm": 12, "device_pixel_ratio": 2, "area_css": [20000, 20000]}))
+    assert code == 400 and "at most" in answer["message"]
+
+
+def test_an_unexpected_error_answers_json_500(server, monkeypatch):
+    app, base, _ = server
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(app.calibration, "state", broken)
+    status, headers, data = request(base + "/api/calibration")
+    assert status == 500 and headers["Content-Type"].startswith("application/json")
+    assert json.loads(data) == {"ok": False, "message": "Internal error (RuntimeError): see the receiver's log"}
+    monkeypatch.setattr(app.receiver, "stop_recording", broken)
+    code, answer = post(base, "/api/record/stop")
+    assert code == 500 and answer["ok"] is False
+    assert json.loads(request(base + "/api/status")[2])["link"]["connected"] is False  # the server carries on
+
+
+class FailingRecording:
+    def __init__(self, directory):
+        self.directory, self.duration_s, self.frames_written = directory, 1.0, 10
+
+    def close(self):
+        raise OSError(28, "No space left on device")
+
+
+def test_a_recording_that_fails_to_close_is_not_reported_as_saved(server, tmp_path, caplog):
+    app, base, _ = server
+    folder = tmp_path / "recordings" / "2026-01-01_000000"
+    folder.mkdir(parents=True)
+    app.receiver._recording = FailingRecording(folder)
+    with caplog.at_level("INFO"):
+        code, answer = post(base, "/api/record/stop")
+    assert code == 500 and answer["ok"] is False and "not closed cleanly" in answer["message"] and "No space" in answer["message"]
+    assert not any(record.getMessage().startswith("Saved ") for record in caplog.records)
+    assert app.receiver.close_error(folder) == "[Errno 28] No space left on device"
+    app.receiver._recording = FailingRecording(folder)
+    assert app.receiver.toggle_recording().startswith(f"Recording {folder} did not close cleanly")
+
+
+def test_ignored_stored_measurements_show_a_note(server):
+    _, base, state = server
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "profile.json").write_text(json.dumps({"version": 1, "hand_length_m": 2.0, "measured": {"hand_length_m": True}}))
+    data = json.loads(request(base + "/api/profile")[2])
+    assert data["profile"]["measured"]["hand_length_m"] is False and data["profile"]["hand_length_m"] == 0.187
+    assert "hand length" in data["note"]

@@ -21,7 +21,8 @@ from __future__ import annotations
 import csv
 import io
 import json
-import shutil
+import os
+import tempfile
 import threading
 import time
 from datetime import datetime
@@ -31,7 +32,7 @@ from typing import Any, Iterable
 
 import av
 
-from . import __version__, paths
+from . import __version__, bodyprofile, calibfile, paths
 from .hevc import hvcc_to_annexb, length_prefixed_to_annexb
 from .protocol import VideoFormat, VideoPacket
 
@@ -79,62 +80,83 @@ def attach_setup_files(state_dir: Path | None, directory: Path, fmt: VideoFormat
     """Copy the current calibration and body measurements into a new recording.
 
     Returns the ``info.json`` entries that describe them: ``calibration`` and ``profile``,
-    each ``{"file": name or None, ...}`` with a ``note`` when something is missing or the
-    calibration was made at another video size (it is still copied; the pipeline rescales K
-    for the same aspect ratio and refuses a different one).
+    each ``{"file": name or None, ...}`` with a ``note`` when something is missing, unusable or
+    could not be written, or when the calibration was made at another video size (it is still
+    copied; the pipeline rescales K for the same aspect ratio and refuses a different one).
+    Each file is handled on its own: one failing never changes what is said about the other.
     """
-    calibration: dict[str, Any] = {"file": None}
-    profile: dict[str, Any] = {"file": None}
     if state_dir is None:
-        calibration["note"] = profile["note"] = "this receiver runs without a state folder"
-        return {"calibration": calibration, "profile": profile}
-
-    source = paths.current_calibration(state_dir)
-    data = _read_json_object(source)
-    if data is None:
-        calibration["note"] = (
-            "no camera calibration saved on this computer (calibrate on the web page): "
-            "the pipeline uses its default camera"
-            if not source.exists() else f"{source} is not a valid calibration: not copied"
-        )
-    else:
-        shutil.copyfile(source, directory / "calibration.json")
-        calibration = {
-            "file": "calibration.json",
-            **{key: data.get(key) for key in ("model", "width", "height", "rms_px", "created", "source")},
-        }
-        width, height = data.get("width"), data.get("height")
-        if (width, height) != (fmt.width, fmt.height):
-            same_aspect = (
-                isinstance(width, int) and isinstance(height, int) and height > 0 and fmt.height > 0
-                and abs(width / height - fmt.width / fmt.height) <= 0.01 * fmt.width / fmt.height
-            )
-            calibration["note"] = (
-                f"calibrated at {width}x{height}, this video is {fmt.width}x{fmt.height}: "
-                + ("same aspect ratio, the pipeline rescales K" if same_aspect
-                   else "different aspect ratio, the pipeline will refuse it; calibrate again at this size")
-            )
-
-    source = paths.profile_path(state_dir)
-    data = _read_json_object(source)
-    if data is None:
-        profile["note"] = (
-            "no body measurements saved on this computer (enter them on the web page): the pipeline uses adult averages"
-            if not source.exists() else f"{source} is not valid: not copied"
-        )
-    else:
-        shutil.copyfile(source, directory / "profile.json")
-        measured = data.get("measured") if isinstance(data.get("measured"), dict) else {}
-        profile = {"file": "profile.json", "measured": sorted(key for key, value in measured.items() if value is True)}
-    return {"calibration": calibration, "profile": profile}
+        note = "this receiver runs without a state folder"
+        return {"calibration": {"file": None, "note": note}, "profile": {"file": None, "note": note}}
+    return {
+        "calibration": _safely("camera calibration", lambda: _attach_calibration(state_dir, directory, fmt)),
+        "profile": _safely("body measurements", lambda: _attach_profile(state_dir, directory)),
+    }
 
 
-def _read_json_object(path: Path) -> dict[str, Any] | None:
+def _safely(what: str, attach: Any) -> dict[str, Any]:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        return attach()
+    except Exception as error:  # a copy failing must not stop the recording, nor touch the other file's entry
+        return {"file": None, "note": f"could not copy the {what}: {error}"}
+
+
+def _attach_calibration(state_dir: Path, directory: Path, fmt: VideoFormat) -> dict[str, Any]:
+    data, note = calibfile.read(paths.current_calibration(state_dir))  # the same check as the calibration page
+    if data is None:
+        return {"file": None, "note": note or (
+            "no camera calibration saved on this computer (calibrate on the web page): the pipeline uses its default camera"
+        )}
+    try:
+        _write_json(directory / "calibration.json", data)  # exactly what was checked, even if the file changes meanwhile
+    except OSError as error:
+        return {"file": None, "note": f"could not copy the calibration: {error.strerror or error}"}
+    entry = {"file": "calibration.json", **{key: data.get(key) for key in ("model", "width", "height", "rms_px", "created", "source")}}
+    width, height = data["width"], data["height"]
+    if (width, height) != (fmt.width, fmt.height):
+        same_aspect = fmt.height > 0 and abs(width / height - fmt.width / fmt.height) <= 0.01 * fmt.width / fmt.height
+        entry["note"] = (
+            f"calibrated at {width}x{height}, this video is {fmt.width}x{fmt.height}: "
+            + ("same aspect ratio, the pipeline rescales K" if same_aspect
+               else "different aspect ratio, the pipeline will refuse it; calibrate again at this size")
+        )
+    return entry
+
+
+def _attach_profile(state_dir: Path, directory: Path) -> dict[str, Any]:
+    source = paths.profile_path(state_dir)
+    if not source.exists():
+        return {"file": None, "note": "no body measurements saved on this computer (enter them on the web page): the pipeline uses adult averages"}
+    try:
+        raw = json.loads(source.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
+        raw = None
+    if not isinstance(raw, dict):
+        return {"file": None, "note": f"{source} is not valid: not copied, the pipeline uses adult averages"}
+    profile, note = bodyprofile.load(source)  # values that are not plausible are dropped, and the note says which
+    try:
+        bodyprofile.save(directory / "profile.json", profile)
+    except OSError as error:
+        return {"file": None, "note": f"could not copy the body measurements: {error.strerror or error}"}
+    entry: dict[str, Any] = {"file": "profile.json", "measured": [key for key in bodyprofile.MEASURABLE if profile["measured"][key]]}
+    if note:
+        entry["note"] = note
+    return entry
+
+
+def _write_json(path: Path, data: Any, sort_keys: bool = False) -> None:
+    """Write JSON atomically: a reader (or a crash) never sees half a file."""
+    handle, temporary = tempfile.mkstemp(prefix="." + path.name, suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            json.dump(data, stream, indent=2, sort_keys=sort_keys)
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
 
 
 class Recording:
@@ -162,10 +184,7 @@ class Recording:
         self._device = self._open_csv("device_state.csv", DEVICE_HEADER)
         self._clock = self._open_csv("clock.csv", CLOCK_HEADER)
         self._hands = self._open_csv("hands.csv", HANDS_HEADER)
-        try:
-            self._metadata.update(attach_setup_files(setup_dir, self.directory, fmt))
-        except OSError as error:  # a copy failing must not stop the recording
-            self._metadata["calibration"] = self._metadata["profile"] = {"file": None, "note": f"could not copy: {error}"}
+        self._metadata.update(attach_setup_files(setup_dir, self.directory, fmt))  # never raises: failures become notes
         self._write_info()
 
     # ------------------------------------------------------------ video
@@ -261,13 +280,17 @@ class Recording:
             self._closed = True
             # Close everything even if one step fails (a full disk, say); report the first error.
             steps = [self._container.close] if self._container is not None else []
-            steps += [handle.close for handle in self._files] + [lambda: self._write_info(ended=True)]
+            steps += [handle.close for handle in self._files]
             error: Exception | None = None
             for step in steps:
                 try:
                     step()
                 except Exception as failure:
                     error = error or failure
+            try:  # a failed close is recorded as such, never as a complete recording
+                self._write_info(ended=True, failure=error)
+            except Exception as failure:
+                error = error or failure
             if error is not None:
                 raise error
         return self.directory
@@ -282,7 +305,7 @@ class Recording:
     def duration_s(self) -> float:
         return (time.monotonic_ns() - self.started_mac_ns) / 1e9
 
-    def _write_info(self, ended: bool = False) -> None:
+    def _write_info(self, ended: bool = False, failure: Exception | None = None) -> None:
         info = {
             "receiver": f"glassesdata-receiver {__version__}",
             "startedAt": self.started_at.isoformat(),
@@ -295,7 +318,10 @@ class Recording:
             ),
             **self._metadata,
         }
-        if ended:
+        if ended and failure is not None:
+            # Not the "complete" fields: the recordings list shows it as interrupted, with the reason.
+            info.update(closeError=str(failure) or type(failure).__name__, closeFailedAt=datetime.now().astimezone().isoformat())
+        elif ended:
             info.update(
                 endedAt=datetime.now().astimezone().isoformat(),
                 endedMacTimeNs=time.monotonic_ns(),
@@ -304,7 +330,7 @@ class Recording:
                 lastPtsUs=self._last_pts,
                 handRows=self.hand_rows,
             )
-        (self.directory / "info.json").write_text(json.dumps(info, indent=2, sort_keys=True))
+        _write_json(self.directory / "info.json", info, sort_keys=True)
 
     def _open_csv(self, name: str, header: list[str]) -> Any:
         handle = open(self.directory / name, "w", newline="", encoding="utf-8", buffering=1 << 16)

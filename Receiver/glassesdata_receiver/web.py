@@ -64,6 +64,7 @@ import secrets
 import select
 import socket
 import socketserver
+import sys
 import threading
 import time
 from collections import deque
@@ -316,6 +317,7 @@ def list_recordings(root: Path, active: Path | None = None, active_seconds: floa
             state, seconds, frames = "interrupted", None, _count_rows(folder / "frames.csv")
         entries.append({
             "name": folder.name, "started": started, "seconds": seconds, "frames": frames, "bytes": size, "state": state,
+            "error": info.get("closeError") if isinstance(info.get("closeError"), str) else None,
         })
 
     def newest_first(entry: dict[str, Any]) -> tuple[float, str]:
@@ -722,6 +724,7 @@ _PAGE_CSP = (
 class _Handler(BaseHTTPRequestHandler):
     server: _Server
     _cookies_to_set: list[str] = []  # replaced per request by _allowed; never mutated here
+    _responded = False  # a status line was sent for the current request
     protocol_version = "HTTP/1.1"
     server_version = "GlassesData"
     sys_version = ""
@@ -799,16 +802,38 @@ class _Handler(BaseHTTPRequestHandler):
 
     # ------------------------------------------------------------ routes
 
+    def send_response(self, code: int, message: str | None = None) -> None:
+        self._responded = True  # from here on an error can only close the connection
+        super().send_response(code, message)
+
     def do_GET(self) -> None:  # noqa: N802 - http.server's naming
+        self._responded = False
         try:
             self._get()
         except (BrokenPipeError, ConnectionResetError, socket.timeout):
             self.close_connection = True
+        except Exception:
+            self._internal_error()
 
     def do_POST(self) -> None:  # noqa: N802
+        self._responded = False
         try:
             self._post()
         except (BrokenPipeError, ConnectionResetError, socket.timeout):
+            self.close_connection = True
+        except Exception:
+            self._internal_error()
+
+    def _internal_error(self) -> None:
+        """An unexpected failure answers a JSON 500 (and is logged) instead of a dropped connection."""
+        log.exception("web %s %s failed", self.command, urlsplit(self.path).path)
+        if self._responded:
+            self.close_connection = True
+            return
+        error = sys.exc_info()[1]
+        try:
+            self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "message": f"Internal error ({type(error).__name__}): see the receiver's log"})
+        except OSError:
             self.close_connection = True
 
     def _get(self) -> None:
@@ -896,8 +921,11 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, {"ok": True, "message": message, "name": folder.name})
         elif path == "/api/record/stop":
             folder = receiver.stop_recording()
+            error = receiver.close_error(folder) if folder is not None else None
             if folder is None:
                 self._json(HTTPStatus.OK, {"ok": True, "message": "Not recording"})
+            elif error:
+                self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "message": f"{folder.name} was not closed cleanly: {error}", "name": folder.name})
             else:
                 self._json(HTTPStatus.OK, {"ok": True, "message": f"Saved {folder.name}", "name": folder.name})
         elif path == "/api/hands/toggle":

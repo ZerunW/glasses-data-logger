@@ -39,7 +39,7 @@ from typing import TYPE_CHECKING, Any, Callable
 import cv2
 import numpy as np
 
-from . import paths
+from . import calibfile, paths
 from .bodyprofile import write_json_atomic
 
 if TYPE_CHECKING:
@@ -74,6 +74,11 @@ UNDISTORTED_HEIGHT = 560
 OUTLIER_FACTOR = 3.0
 FISHEYE_MARGIN = 0.9  # fisheye wins only with a held-out error below 90 % of the pinhole one
 FOLDS = 5
+MAX_RMS_PX = 1.5  # a solution with a larger reprojection error cannot be saved
+FOCAL_RATIO = (0.8, 1.25)  # plausible fx / fy (pixels are close to square)
+MAX_DEVICE_PX_PER_MM = 25.0  # about 635 pixels per inch: denser than any screen
+MAX_BOARD_PIXELS = 40_000_000
+MAX_BOARD_SIDE = 16384
 DEVICE = "Ray-Ban Meta"
 SOURCE = "charuco-web"
 _CRITERIA = (cv2.TERM_CRITERIA_COUNT | cv2.TERM_CRITERIA_EPS, 100, 1e-10)
@@ -180,6 +185,11 @@ def design_board(css_px_per_mm: float, device_pixel_ratio: float, area_css: tupl
         if not (isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and low <= value <= high):
             raise ValueError(f"{name} must be a number from {low:g} to {high:g}")
     device_per_mm = css_px_per_mm * device_pixel_ratio
+    if device_per_mm > MAX_DEVICE_PX_PER_MM:
+        raise ValueError(
+            f"css_px_per_mm x device_pixel_ratio is {device_per_mm:.1f} device pixels per mm; "
+            f"no screen has more than {MAX_DEVICE_PX_PER_MM:g}: measure the screen again"
+        )
     width_mm = area_css[0] / css_px_per_mm - 2 * EDGE_MARGIN_MM
     height_mm = area_css[1] / css_px_per_mm - 2 * EDGE_MARGIN_MM
     target = min(max(min(width_mm, height_mm) / 6.0, MIN_SQUARE_MM), MAX_SQUARE_MM)
@@ -197,6 +207,10 @@ def design_board(css_px_per_mm: float, device_pixel_ratio: float, area_css: tupl
     square_px = int(math.floor(square_mm * device_per_mm))
     if square_px < 4 * MARKER_MODULES:
         raise ValueError("the screen area is too small for a board")
+    width_px, height_px = squares_x * square_px, squares_y * square_px
+    if width_px > MAX_BOARD_SIDE or height_px > MAX_BOARD_SIDE or width_px * height_px > MAX_BOARD_PIXELS:
+        raise ValueError(f"the board would be {width_px} x {height_px} pixels; at most {MAX_BOARD_SIDE} a side and "
+                         f"{MAX_BOARD_PIXELS // 1_000_000} million in all")
     marker_px = _marker_px(square_px)
     return BoardSpec(
         squares_x=squares_x,
@@ -509,9 +523,11 @@ class CaptureSession:
         self._preview: bytes | None = None
         self._sequence = 0
         self._accepted = 0
+        self._generation = 0  # changes whenever the kept views change: a solution of another generation is stale
         self._note = ""
         self._failures = 0
         self._capturing = threading.Event()
+        self._looking = threading.Lock()  # held while a frame is looked at (see set_capturing)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="gd-calibration", daemon=True)
 
@@ -520,10 +536,15 @@ class CaptureSession:
         self._thread.start()
 
     def set_capturing(self, on: bool) -> None:
+        """Resume or pause. A pause returns only once a look in progress has finished, so no view is
+        kept after it (a solve that follows sees the final set of views)."""
         if on:
             self._capturing.set()
         else:
             self._capturing.clear()
+            if threading.current_thread() is not self._thread:
+                with self._looking:
+                    pass
 
     @property
     def capturing(self) -> bool:
@@ -559,7 +580,10 @@ class CaptureSession:
             last_index = frame.index
             next_at = last_frame + DETECT_INTERVAL_S
             try:
-                self.process(frame.image, last_frame)
+                with self._looking:
+                    if not self._capturing.is_set() or self._stop.is_set():
+                        continue  # paused while waiting for the frame
+                    self.process(frame.image, last_frame)
             except Exception:
                 self._failures += 1
                 if self._failures == 1:
@@ -575,6 +599,7 @@ class CaptureSession:
             if selector is None or (selector.width, selector.height) != (width, height):
                 if selector is not None and selector.samples:
                     self._note = f"The video size changed to {width}x{height}: the views so far were dropped"
+                    self._generation += 1
                 K, dist = provisional_camera(width, height, self._current)
                 selector = self._selector = SampleSelector(self.spec, width, height, K, dist)
             look = selector.consider(corners, ids, now, len(markers), lambda: _jpeg(image, 92))
@@ -587,6 +612,7 @@ class CaptureSession:
             self._sequence += 1
             if look.accepted:
                 self._accepted += 1
+                self._generation += 1
                 self._note = ""
         return look
 
@@ -596,12 +622,18 @@ class CaptureSession:
         with self._lock:
             return self._preview
 
-    def snapshot(self) -> tuple[tuple[int, int] | None, list[Sample]]:
+    def snapshot(self) -> tuple[tuple[int, int] | None, list[Sample], int]:
+        """The video size, the kept views and their generation, consistently."""
         with self._lock:
             selector = self._selector
             if selector is None:
-                return None, []
-            return (selector.width, selector.height), list(selector.samples)
+                return None, [], self._generation
+            return (selector.width, selector.height), list(selector.samples), self._generation
+
+    @property
+    def generation(self) -> int:
+        with self._lock:
+            return self._generation
 
     def status(self) -> dict[str, Any]:
         with self._lock:
@@ -619,6 +651,7 @@ class CaptureSession:
                 "min_corners": MIN_CORNERS,
                 "sequence": self._sequence,
                 "accepted_total": self._accepted,
+                "generation": self._generation,
                 "coverage": None,
                 "distances": selector.distance_counts() if selector else None,
                 "sides": selector.side_counts() if selector else None,
@@ -744,35 +777,85 @@ def held_out_error(fit: Fit, obj: np.ndarray, img: np.ndarray) -> np.ndarray:
     return projected.reshape(-1, 2) - img.reshape(-1, 2)
 
 
-def cross_validate(fitter: Callable[..., Fit], objects: list[np.ndarray], images: list[np.ndarray], size: tuple[int, int]) -> float:
-    """RMS error on views left out of the fit, over ``FOLDS`` folds."""
+_FIT_ERRORS = (cv2.error, ValueError, np.linalg.LinAlgError)
+
+
+def fit_both(objects: list[np.ndarray], images: list[np.ndarray], size: tuple[int, int]) -> dict[str, Fit | None]:
+    """Both models on the same views (None for one that cannot be fitted). The fisheye fit starts
+    from this pinhole fit's K, falling back to OpenCV's own start."""
+    fits: dict[str, Fit | None] = {"pinhole": None, "fisheye": None}
+    try:
+        fits["pinhole"] = fit_pinhole(objects, images, size)
+    except _FIT_ERRORS as error:
+        log.debug("Calibration: pinhole fit failed: %s", error)
+    starts = [fits["pinhole"].K, None] if fits["pinhole"] is not None else [None]
+    for start in starts:
+        try:
+            fits["fisheye"] = fit_fisheye(objects, images, size, start)
+            break
+        except _FIT_ERRORS as error:
+            log.debug("Calibration: fisheye fit failed: %s", error)
+    return fits
+
+
+def common_inliers(fits: dict[str, Fit | None], count: int) -> list[int]:
+    """The views both models are judged on. A view is dropped only when its error is above
+    OUTLIER_FACTOR x the median under every model that fitted: a bad detection, not a lens that
+    one of the models cannot describe (dropping those would bias the choice towards that model)."""
+    ratios = []
+    for fit in fits.values():
+        if fit is None:
+            continue
+        median = float(np.median(fit.per_view_px))
+        ratios.append([error / median if median > 0 else 0.0 for error in fit.per_view_px])
+    if not ratios:
+        return list(range(count))
+    keep = [index for index in range(count) if min(ratio[index] for ratio in ratios) <= OUTLIER_FACTOR]
+    return keep if len(keep) >= MIN_SOLVE_SAMPLES else list(range(count))
+
+
+def cross_validate(objects: list[np.ndarray], images: list[np.ndarray], size: tuple[int, int]) -> dict[str, float | None]:
+    """RMS error on views left out of the fit, for both models on the same ``FOLDS`` folds (each
+    fold's fisheye fit starts from that fold's own pinhole fit). None for a model that failed in
+    any fold: its errors would then cover other views than the other model's."""
     count = len(objects)
     folds = min(FOLDS, count)
-    errors = []
+    errors: dict[str, list[np.ndarray]] = {"pinhole": [], "fisheye": []}
+    failed: set[str] = set()
     for fold in range(folds):
         test = list(range(fold, count, folds))
         train = [index for index in range(count) if index % folds != fold]
         if len(train) < 3:
             continue
-        fit = fitter([objects[i] for i in train], [images[i] for i in train], size)
-        for index in test:
-            errors.append(held_out_error(fit, objects[index], images[index]))
-    if not errors:
-        return math.nan
-    return _rms(np.concatenate(errors))
+        fold_fits = fit_both([objects[i] for i in train], [images[i] for i in train], size)
+        for name, fit in fold_fits.items():
+            if fit is None:
+                failed.add(name)
+                continue
+            for index in test:
+                try:
+                    errors[name].append(held_out_error(fit, objects[index], images[index]))
+                except _FIT_ERRORS:
+                    failed.add(name)
+    return {name: (None if name in failed or not found else _rms(np.concatenate(found))) for name, found in errors.items()}
 
 
-def _fit_without_outliers(fitter: Callable[..., Fit], objects: list[np.ndarray], images: list[np.ndarray], size: tuple[int, int]) -> tuple[Fit, list[int]]:
-    """Fit, drop the views whose error is above OUTLIER_FACTOR x the median, fit again.
-    Returns the fit and the indices of the views it used."""
-    used = list(range(len(objects)))
-    fit = fitter(objects, images, size)
-    median = float(np.median(fit.per_view_px))
-    keep = [index for index, error in zip(used, fit.per_view_px) if error <= OUTLIER_FACTOR * median]
-    if len(keep) < len(used) and len(keep) >= MIN_SOLVE_SAMPLES:
-        used = keep
-        fit = fitter([objects[i] for i in used], [images[i] for i in used], size)
-    return fit, used
+def sanity_problems(fit: Fit, width: int, height: int) -> list[str]:
+    """Why a fit is not believable (empty when it is). A solution whose chosen fit has any cannot be saved."""
+    K, dist = np.asarray(fit.K, dtype=np.float64), np.asarray(fit.dist, dtype=np.float64)
+    if not (np.all(np.isfinite(K)) and np.all(np.isfinite(dist))):
+        return ["the parameters are not finite numbers"]
+    problems = []
+    fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
+    if fx <= 0 or fy <= 0:
+        problems.append("a focal length is not positive")
+    elif not FOCAL_RATIO[0] <= fx / fy <= FOCAL_RATIO[1]:
+        problems.append(f"fx / fy is {fx / fy:.2f}, far from square pixels ({FOCAL_RATIO[0]:g} to {FOCAL_RATIO[1]:g})")
+    if not (0 <= cx <= width - 1 and 0 <= cy <= height - 1):
+        problems.append(f"the principal point ({cx:.0f}, {cy:.0f}) lies outside the {width}x{height} image")
+    if not (math.isfinite(fit.rms_px) and fit.rms_px <= MAX_RMS_PX):
+        problems.append(f"the reprojection error ({fit.rms_px:.2f} px) is above {MAX_RMS_PX:g} px")
+    return problems
 
 
 def field_of_view(model: str, K: np.ndarray, dist: np.ndarray, width: int, height: int) -> dict[str, float]:
@@ -800,10 +883,12 @@ class Solution:
     chosen: Fit
     fits: dict[str, Fit | None]
     held_out_px: dict[str, float | None]
-    used: dict[str, list[int]]  # sample indices each model used
+    used: list[int]  # the sample indices both models were fitted and judged on
     views: int
     why: str
     board: dict[str, Any]
+    problems: list[str] = field(default_factory=list)  # sanity checks the chosen fit failed: not saveable
+    generation: int = 0  # of the views it was solved from (see CaptureSession)
     preview: bytes | None = None
     created: str = field(default_factory=utc_now)
 
@@ -827,14 +912,20 @@ class Solution:
             "board": dict(self.board),
         }
 
-    def describe(self) -> dict[str, Any]:
-        """For the page."""
-        used = set(self.used[self.chosen.model])
+    def describe(self, stale: bool = False) -> dict[str, Any]:
+        """For the page. ``stale``: the kept views changed since this was solved."""
+        used = set(self.used)
         per_view: list[float | None] = [None] * self.views
-        for index, error in zip(self.used[self.chosen.model], self.chosen.per_view_px):
+        for index, error in zip(self.used, self.chosen.per_view_px):
             per_view[index] = round(error, 3)
+        try:
+            summary = _summary(self.calibration())
+        except Exception:  # non-finite numbers: the problems say why
+            summary = {"model": self.chosen.model, "width": self.width, "height": self.height, "fx": None, "fy": None,
+                       "cx": None, "cy": None, "dist": [float(v) for v in self.chosen.dist], "rms_px": self.chosen.rms_px,
+                       "fov_deg": None, "created": self.created}
         return {
-            **_summary(self.calibration()),
+            **summary,
             "views": self.views,
             "views_used": len(used),
             "dropped": [index for index in range(self.views) if index not in used],
@@ -842,12 +933,15 @@ class Solution:
             "rms_by_model": {name: (round(fit.rms_px, 4) if fit else None) for name, fit in self.fits.items()},
             "held_out_px": {name: (round(value, 4) if value is not None and math.isfinite(value) else None) for name, value in self.held_out_px.items()},
             "why": self.why,
+            "problems": list(self.problems),
+            "stale": stale,
+            "saveable": not self.problems and not stale,
         }
 
 
-def solve(spec: BoardSpec | dict[str, Any], samples: list[Sample], size: tuple[int, int]) -> Solution:
+def solve(spec: BoardSpec | dict[str, Any], samples: list[Sample], size: tuple[int, int], generation: int = 0) -> Solution:
     """Fit both models and choose one (see the module docstring). Raises ValueError with a reason
-    the person can read when it cannot."""
+    the person can read when neither can be fitted."""
     if len(samples) < MIN_SOLVE_SAMPLES:
         raise ValueError(f"need at least {MIN_SOLVE_SAMPLES} views, have {len(samples)}")
     if isinstance(spec, BoardSpec):
@@ -857,55 +951,49 @@ def solve(spec: BoardSpec | dict[str, Any], samples: list[Sample], size: tuple[i
         board = cv2.aruco.CharucoBoard((spec["squares_x"], spec["squares_y"]), spec["square_m"], spec["marker_m"], dictionary)
         board_json = dict(spec)
     objects, images = _points(board, samples)
-    fits: dict[str, Fit | None] = {}
-    used: dict[str, list[int]] = {}
-    held: dict[str, float | None] = {}
-    def fisheye_fitter(objs: list[np.ndarray], imgs: list[np.ndarray], image_size: tuple[int, int]) -> Fit:
-        pinhole_fit = fits.get("pinhole")
-        if pinhole_fit is not None:
-            try:
-                return fit_fisheye(objs, imgs, image_size, pinhole_fit.K)
-            except (cv2.error, ValueError, np.linalg.LinAlgError):
-                pass
-        return fit_fisheye(objs, imgs, image_size)
-
-    for name, fitter in (("pinhole", fit_pinhole), ("fisheye", fisheye_fitter)):
-        try:
-            fit, indices = _fit_without_outliers(fitter, objects, images, size)
-            fits[name], used[name] = fit, indices
-            held[name] = cross_validate(fitter, [objects[i] for i in indices], [images[i] for i in indices], size)
-        except (cv2.error, ValueError, np.linalg.LinAlgError) as error:
-            log.info("Calibration: the %s fit failed: %s", name, error)
-            fits[name], used[name], held[name] = None, [], None
-    pinhole, fisheye = fits.get("pinhole"), fits.get("fisheye")
-    if pinhole is None and fisheye is None:
+    # One outlier step for both models; then both are fitted and cross-validated on the same views.
+    used = common_inliers(fit_both(objects, images, size), len(objects))
+    objects, images = [objects[i] for i in used], [images[i] for i in used]
+    fits = fit_both(objects, images, size)
+    if fits["pinhole"] is None and fits["fisheye"] is None:
         raise ValueError("neither camera model could be fitted: capture more varied views")
-
-    def usable(value: float | None) -> bool:
-        return value is not None and math.isfinite(value)
-
-    if pinhole is not None and (fisheye is None or not usable(held["fisheye"])):
-        chosen, why = pinhole, "Pinhole: the fisheye model could not be fitted"
-    elif pinhole is None or not usable(held["pinhole"]):
-        chosen, why = fisheye, "Fisheye: the pinhole model could not be fitted"
-    elif held["fisheye"] < FISHEYE_MARGIN * held["pinhole"]:
-        chosen = fisheye
-        why = f"Fisheye: its error on views left out of the fit ({held['fisheye']:.2f} px) is clearly lower than pinhole's ({held['pinhole']:.2f} px)"
+    held = cross_validate(objects, images, size)
+    p, f = held["pinhole"], held["fisheye"]
+    usable = {name: fits[name] is not None and held[name] is not None and math.isfinite(held[name]) for name in fits}
+    if usable["pinhole"] and usable["fisheye"]:
+        if f < FISHEYE_MARGIN * p:
+            order = ["fisheye", "pinhole"]
+            why = f"Fisheye: its error on views left out of the fit ({f:.2f} px) is clearly lower than pinhole's ({p:.2f} px)"
+        else:
+            order = ["pinhole", "fisheye"]
+            why = f"Pinhole: its error on views left out of the fit is {p:.2f} px (fisheye {f:.2f} px)"
+    elif usable["pinhole"] or usable["fisheye"]:
+        name = "pinhole" if usable["pinhole"] else "fisheye"
+        order = [name, "fisheye" if name == "pinhole" else "pinhole"]
+        why = f"{name.title()}: the {order[1]} model could not be fitted and checked on left-out views"
     else:
-        chosen = pinhole
-        why = f"Pinhole: its error on views left out of the fit is {held['pinhole']:.2f} px (fisheye {held['fisheye']:.2f} px)"
-    solution = Solution(size[0], size[1], chosen, fits, held, used, len(samples), why, board_json)
-    try:
-        solution.preview = undistorted_preview(solution, samples)
-    except (cv2.error, ValueError):
-        log.debug("Calibration: no undistorted preview", exc_info=True)
+        order = ["pinhole", "fisheye"]
+        why = "No model could be checked on left-out views"
+    order = [name for name in order if fits[name] is not None]
+    checks = {name: sanity_problems(fits[name], size[0], size[1]) for name in order}
+    chosen_name = next((name for name in order if not checks[name]), order[0])
+    if chosen_name != order[0]:
+        why = (f"{chosen_name.title()}: the {order[0]} model fitted better but failed a sanity check "
+               f"({'; '.join(checks[order[0]])})")
+    solution = Solution(size[0], size[1], fits[chosen_name], fits, held, used, len(samples), why, board_json,
+                        problems=checks[chosen_name], generation=generation)
+    if not solution.problems:
+        try:
+            solution.preview = undistorted_preview(solution, samples)
+        except (cv2.error, ValueError):
+            log.debug("Calibration: no undistorted preview", exc_info=True)
     return solution
 
 
 def undistorted_preview(solution: Solution, samples: list[Sample]) -> bytes | None:
     """A kept view, as captured and undistorted, side by side: of the views that show most of the
     board, the one that reaches furthest into a corner of the image (where distortion shows)."""
-    candidates = [(i, s) for i, s in enumerate(samples) if s.jpeg and i in solution.used[solution.chosen.model]]
+    candidates = [(i, s) for i, s in enumerate(samples) if s.jpeg and i in solution.used]
     if not candidates:
         return None
     most = max(len(s.ids) for _, s in candidates)
@@ -973,13 +1061,17 @@ class CalibrationStore:
         self.current_path = paths.current_calibration(state_dir)
         self.screen_path = self.folder / "screen.json"
 
+    def load_current(self) -> tuple[dict[str, Any] | None, str | None]:
+        """The current calibration, or None and why it is not usable (see ``calibfile``)."""
+        return calibfile.read(self.current_path)
+
     def current(self) -> dict[str, Any] | None:
-        data = _read_json(self.current_path)
-        if not isinstance(data, dict) or not {"K", "width", "height"} <= set(data):
-            return None
-        return data
+        return self.load_current()[0]
 
     def save(self, calibration: dict[str, Any]) -> Path:
+        reason = calibfile.problem(calibration)
+        if reason is not None:  # never write what the recorder would refuse to copy
+            raise ValueError(f"not a valid calibration: {reason}")
         stamp = calibration["created"].replace("-", "").replace(":", "")
         path = self.folder / f"calibration_{stamp}.json"
         write_json_atomic(path, calibration)
@@ -987,8 +1079,21 @@ class CalibrationStore:
         return path
 
     def screen(self) -> dict[str, Any] | None:
+        """The saved screen scale, or None when there is none or it is not usable."""
         data = _read_json(self.screen_path)
-        return data if isinstance(data, dict) else None
+        if not isinstance(data, dict):
+            return None
+        try:
+            _number(data, "css_px_per_mm", 1.0, 40.0)
+            _number(data, "device_pixel_ratio", 0.5, 8.0)
+        except ValueError:
+            return None
+        if data.get("screen_css") is not None:
+            try:
+                _pair(data, "screen_css")
+            except ValueError:
+                data = {**data, "screen_css": None}
+        return data
 
     def save_screen(self, screen: dict[str, Any]) -> None:
         write_json_atomic(self.screen_path, screen)
@@ -1048,16 +1153,25 @@ class CalibrationService:
     # -------------------------------------------------------- reads
 
     def state(self) -> dict[str, Any]:
-        current = self.store.current() if self.store else None
+        current, note = self.store.load_current() if self.store else (None, None)
+        summary = None
+        if current is not None:
+            try:
+                summary = _summary(current)
+            except Exception as error:  # the validator passed it; a summary must still never break the page
+                note = f"the saved calibration could not be read ({error}): not used"
         with self._lock:
             session, solution, solving = self._session, self._solution, self._solving
+        status = session.status() if session is not None else None
         return {
             "card_mm": list(CARD_MM),
             "storage": str(self.store.folder) if self.store else None,
             "screen": self.store.screen() if self.store else None,
-            "current": _summary(current) if current else None,
-            "session": None if session is None else {
-                **session.status(), "solving": solving, "solution": solution.describe() if solution else None,
+            "current": summary,
+            "current_note": note,
+            "session": None if status is None else {
+                **status, "solving": solving,
+                "solution": solution.describe(stale=solution.generation != status["generation"]) if solution else None,
             },
         }
 
@@ -1133,31 +1247,41 @@ class CalibrationService:
                 return 409, {"ok": False, "message": "Already solving"}
             self._solving = True
         try:
-            size, samples = session.snapshot()
+            size, samples, generation = session.snapshot()
             if size is None:
                 return 409, {"ok": False, "message": "No video has been seen yet"}
             started = time.monotonic()
             try:
-                solution = solve(session.spec, samples, size)
+                solution = solve(session.spec, samples, size, generation)
             except ValueError as error:
                 return 409, {"ok": False, "message": f"Cannot solve: {error}"}
-            log.info(
-                "Calibration solved in %.1f s: %s, %d views, rms %.3f px", time.monotonic() - started,
-                solution.chosen.model, solution.views, solution.chosen.rms_px,
-            )
             with self._lock:
-                if self._session is session:
-                    self._solution = solution
-            return 200, {"ok": True, "message": f"Solved: {solution.chosen.rms_px:.2f} px RMS", "solution": solution.describe()}
+                if self._session is not session:  # reset or replaced while solving: this answer belongs to nothing
+                    return 409, {"ok": False, "message": "The calibration was reset while solving: nothing was kept"}
+                self._solution = solution
+            log.info(
+                "Calibration solved in %.1f s: %s, %d views, rms %.3f px%s", time.monotonic() - started,
+                solution.chosen.model, solution.views, solution.chosen.rms_px,
+                " (not saveable: " + "; ".join(solution.problems) + ")" if solution.problems else "",
+            )
+            stale = session.generation != generation
+            message = f"Solved: {solution.chosen.rms_px:.2f} px RMS"
+            if solution.problems:
+                message += ", but it cannot be saved: " + "; ".join(solution.problems)
+            return 200, {"ok": True, "message": message, "solution": solution.describe(stale=stale)}
         finally:
             with self._lock:
                 self._solving = False
 
     def save(self) -> tuple[int, dict[str, Any]]:
         with self._lock:
-            solution = self._solution
-        if solution is None:
+            solution, session = self._solution, self._session
+        if solution is None or session is None:
             return 409, {"ok": False, "message": "Nothing to save: solve first"}
+        if session.generation != solution.generation:
+            return 409, {"ok": False, "message": "The views changed since solving: solve again"}
+        if solution.problems:
+            return 409, {"ok": False, "message": "Not saved: the solution failed a sanity check: " + "; ".join(solution.problems)}
         if self.store is None:
             return 409, {"ok": False, "message": "This receiver has no state folder to save to"}
         calibration = solution.calibration()

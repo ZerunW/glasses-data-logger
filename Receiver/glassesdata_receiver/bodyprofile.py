@@ -70,11 +70,18 @@ def load(path: Path) -> tuple[dict[str, Any], str | None]:
     if not isinstance(raw, dict):
         return profile, f"{path.name} is not a JSON object; showing the defaults"
     measured = raw.get("measured") if isinstance(raw.get("measured"), dict) else {}
+    ignored = []
     for key in MEASURABLE:
+        if measured.get(key) is not True:
+            continue  # not measured: the default stands, whatever value the file holds
         value = raw.get(key)
-        if _plausible(key, value) and measured.get(key) is True:
+        if _plausible(key, value):
             profile[key] = round(float(value), 4)
             profile["measured"][key] = True
+        else:
+            ignored.append(MEASURABLE[key][0].lower())
+    if ignored:
+        return profile, f"{path.name}: ignored stored values that are not plausible ({', '.join(ignored)}); the averages are used instead"
     return profile, None
 
 

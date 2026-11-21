@@ -101,6 +101,11 @@ class UsbSource(threading.Thread):
 
     def run(self) -> None:
         status = self._receiver.set_source_status
+        if isinstance(self._port, bool) or not isinstance(self._port, int) or not 1 <= self._port <= 65535:
+            # The CLI refuses such a port; anything else that builds a UsbSource gets a clear error, not a dead thread.
+            log.error("USB link not started: %r is not a port (1-65535)", self._port)
+            status("usb", f"not started: {self._port!r} is not a port (1-65535)")
+            return
         while not self._stop_event.is_set():
             if self._receiver.busy:
                 self._stop_event.wait(RETRY_S)
@@ -124,7 +129,7 @@ class UsbSource(threading.Thread):
                     status("usb", f"iPhone found - cannot connect ({error})")
                 self._stop_event.wait(RETRY_S)
                 continue
-            except (usbmux.UsbmuxError, OSError) as error:
+            except (usbmux.UsbmuxError, OSError, ValueError) as error:
                 status("usb", f"cannot connect ({error})")
                 self._stop_event.wait(RETRY_S)
                 continue

@@ -756,6 +756,7 @@ dialog p strong { color: var(--text); font-weight: 600; }
 .setup-hero { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
 .setup-hero .unit { margin-left: 6px; }
 .setup-note { margin: 0; color: var(--text-2); font-size: var(--fs-small); line-height: 1.5; }
+#calib-card .callout-warn { margin-bottom: 10px; overflow-wrap: anywhere; }
 .setup-foot { display: flex; align-items: center; gap: 10px; margin-top: 14px; min-width: 0; }
 .setup-foot .faint { font-size: var(--fs-small); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .setup-foot .warn { font-size: var(--fs-small); display: inline-flex; gap: 6px; align-items: center; min-width: 0; }
@@ -2687,7 +2688,7 @@ dialog.wide[open] { display: flex; flex-direction: column; }
       let badge;
       if (r.state === "recording") { badge = el("span", "tag rec"); badge.append(el("span", "dot rec"), el("span", null, "Recording")); }
       else if (r.state === "complete") { badge = el("span", "tag"); badge.append(icon("check", "sm"), el("span", null, "Complete")); }
-      else { badge = el("span", "tag warn"); badge.append(icon("alert", "sm"), el("span", null, "Interrupted")); badge.title = "The receiver stopped without closing it; video.mp4 plays up to its last fragment"; }
+      else { badge = el("span", "tag warn"); badge.append(icon("alert", "sm"), el("span", null, "Interrupted")); badge.title = r.error ? "It did not close cleanly: " + r.error + ". video.mp4 plays up to its last fragment" : "The receiver stopped without closing it; video.mp4 plays up to its last fragment"; }
       state.appendChild(badge);
       tr.appendChild(state);
       body.appendChild(tr);
@@ -2854,7 +2855,7 @@ dialog.wide[open] { display: flex; flex-direction: column; }
   let calibState = null;            // GET /api/calibration
   let profileState = null;          // GET /api/profile
   const calib = { open: false, step: "scale", widthCss: 0, timer: null, polling: false, boardShown: false, fullscreen: false,
-    solving: false, saved: false, lastAccepted: -1, previewSeq: -1, previewLoading: false, resizeTimer: null, laidOut: null };
+    solving: false, saved: false, lastAccepted: -1, previewSeq: -1, previewLoading: false, resizeTimer: null, laidOut: null, layoutToken: 0 };
 
   function ratioNow() { return Math.round((window.devicePixelRatio || 1) * 10000) / 10000; }
   function round4(v) { return Math.round(v * 10000) / 10000; }
@@ -2912,19 +2913,26 @@ dialog.wide[open] { display: flex; flex-direction: column; }
     const fmt = last && last.video.format;
     const otherSize = !!(c && fmt && (fmt.width !== c.width || fmt.height !== c.height));
     const aside = $("calib-aside");
-    const tagText = !c ? "Not calibrated" : otherSize ? "Other video size" : "Calibrated";
-    if (aside.textContent !== tagText) aside.replaceChildren(el("span", "tag" + (!c ? "" : otherSize ? " warn" : " good"), tagText));
+    const broken = !c && !!calibState.current_note;
+    const tagText = broken ? "Unusable file" : !c ? "Not calibrated" : otherSize ? "Other video size" : "Calibrated";
+    if (aside.textContent !== tagText) aside.replaceChildren(el("span", "tag" + (broken ? " bad" : !c ? "" : otherSize ? " warn" : " good"), tagText));
     const scale = storedScale(), change = scaleChange(scale);
     const screenLine = $("calib-screen");
     setText(screenLine, !scale ? "Screen not measured yet" : change ? "Display changed: measure the screen again" : "Screen " + cssPxPerMm(scale).toFixed(2) + " px per mm");
     setClass(screenLine, change ? "warn" : "faint");
     screenLine.title = change || (scale && scale.measured ? "Measured " + ago(scale.measured) + " with a bank card" : "");
-    const key = JSON.stringify([c && c.created, otherSize, fmt && fmt.width, c && ago(c.created)]);
+    const key = JSON.stringify([c && c.created, otherSize, fmt && fmt.width, c && ago(c.created), calibState.current_note]);
     if (box.dataset.key === key) return;
     box.dataset.key = key;
     if (!c) {
-      box.replaceChildren(el("p", "setup-note", "Not calibrated yet: the pipeline assumes a 65° horizontal field of view and no lens distortion. "
-        + "Calibrating takes a few minutes, with the glasses on and a bank card."));
+      const nodes = [el("p", "setup-note", "Not calibrated yet: the pipeline assumes a 65° horizontal field of view and no lens distortion. "
+        + "Calibrating takes a few minutes, with the glasses on and a bank card.")];
+      if (calibState.current_note) {
+        const warn = el("div", "callout-warn");
+        warn.append(icon("alert"), el("span", null, sentence(calibState.current_note) + ". Calibrate again to replace it."));
+        nodes.unshift(warn);
+      }
+      box.replaceChildren(...nodes);
       return;
     }
     const hero = el("div", "setup-hero");
@@ -3105,6 +3113,7 @@ dialog.wide[open] { display: flex; flex-direction: column; }
     }
     const solve = $("capture-solve");
     solve.hidden = !session || session.samples < session.min_solve;
+    solve.textContent = session && session.solution ? (session.solution.stale ? "Views changed: solve again" : "See the result") : "Solve";
     solve.classList.toggle("primary", !!session && session.samples >= session.target);
     $("capture-reset").hidden = !session || !session.samples;
     $("board-show").lastChild.textContent = session && session.samples ? "Continue capturing" : "Show the board";
@@ -3146,10 +3155,13 @@ dialog.wide[open] { display: flex; flex-direction: column; }
     await nextFrame();
     if (!calib.boardShown) return;
     await layoutBoard();
+    if (!calib.boardShown) return;
     $("hud-exit").focus();
     pollCalib();
   }
   async function layoutBoard() {
+    const token = ++calib.layoutToken;
+    const gone = () => !calib.boardShown || token !== calib.layoutToken;  // closed, or laid out again, while waiting
     const view = $("board-view"), hud = $("hud");
     const W = view.clientWidth, H = view.clientHeight, r = ratioNow(), margin = Math.max(16, Math.min(32, Math.round(Math.min(W, H) * 0.025)));
     const beside = W >= H * 1.15;  // landscape: the panel at the right; portrait: below
@@ -3165,9 +3177,14 @@ dialog.wide[open] { display: flex; flex-direction: column; }
     let shown = board;
     if (keep) {
       await post("/api/calibration/capture", { active: true }).catch(() => {});
+      if (gone()) { if (!calib.boardShown) post("/api/calibration/capture", { active: false }).catch(() => {}); return; }
     } else {
       const result = await post("/api/calibration/start", { css_px_per_mm: pxmm, device_pixel_ratio: r, area_css: [Math.floor(area.w), Math.floor(area.h)] })
         .catch(() => ({ ok: false, message: "Could not reach the receiver." }));
+      if (gone()) {  // the board was closed while the receiver started capturing: stop it again
+        if (!calib.boardShown && result.ok) post("/api/calibration/capture", { active: false }).catch(() => {});
+        return;
+      }
       if (!result.ok) { toast(result.message, "bad"); exitBoard(); return; }
       if (!result.kept && session && session.samples) toast("The board changed size, so the capture starts over", "");
       shown = result.board;
@@ -3337,7 +3354,18 @@ dialog.wide[open] { display: flex; flex-direction: column; }
       el("span", null, "max " + fixed(peak, 2) + " px"));
     bars.append(el("span", "label", "Error per view"), chart, legend);
     const actions = el("div", "step-actions");
-    if (calib.saved) {
+    const blockers = [];
+    if (sol.stale) blockers.push("The views changed since this was solved: solve again before saving.");
+    if (sol.problems && sol.problems.length) blockers.push("It cannot be saved: " + sol.problems.join("; ") + ". Capture more varied views and solve again.");
+    if (blockers.length && !calib.saved) {
+      const warn = el("div", "callout-warn");
+      warn.append(icon("alert"), el("span", null, blockers.join(" ")));
+      const again = el("button", "btn primary", sol.stale ? "Solve again" : "Capture more"); again.type = "button";
+      again.addEventListener("click", sol.stale ? solveCalib : () => showStep("capture"));
+      const over = el("button", "btn ghost", "Start over"); over.type = "button"; over.addEventListener("click", resetCalib);
+      actions.append(again, over);
+      side.append(head, why, metrics, warn, actions, details, bars);
+    } else if (calib.saved) {
       const banner = el("div", "saved-banner");
       banner.append(icon("check"), el("span", null, "Saved. New recordings get this calibration."));
       const done = el("button", "btn primary", "Done"); done.type = "button"; done.addEventListener("click", closeCalib);
@@ -3381,7 +3409,10 @@ dialog.wide[open] { display: flex; flex-direction: column; }
   $("calib-open").addEventListener("click", openCalib);
   $("calib-close").addEventListener("click", closeCalib);
   $("board-show").addEventListener("click", showBoard);
-  $("capture-solve").addEventListener("click", solveCalib);
+  $("capture-solve").addEventListener("click", () => {
+    const sol = calibState && calibState.session && calibState.session.solution;
+    if (sol && !sol.stale) showStep("result"); else solveCalib();
+  });
   $("capture-reset").addEventListener("click", resetCalib);
   $("hud-exit").addEventListener("click", () => exitBoard());
   $("hud-guide").addEventListener("animationend", () => $("hud-guide").classList.remove("got"));

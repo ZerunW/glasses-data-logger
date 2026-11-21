@@ -16,6 +16,34 @@ from . import paths, protocol
 from .receiver import Receiver
 
 
+def link_port(text: str) -> int:
+    """``--port``: 1-65535, or 0 (any free port, only for the --wifi listener; checked in parse_args)."""
+    try:
+        port = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{text!r} is not a port number") from None
+    if not 0 <= port <= 65535:
+        raise argparse.ArgumentTypeError(f"{port} is not a port: use 1 to 65535 (0: any free port, with --wifi only)")
+    return port
+
+
+def tcp_address(text: str) -> tuple[str, int]:
+    """``--tcp HOST:PORT`` (``:PORT`` means 127.0.0.1; an IPv6 host goes in brackets)."""
+    host, separator, port = text.rpartition(":")
+    if not separator:
+        raise argparse.ArgumentTypeError(f"{text!r} is not HOST:PORT, such as 127.0.0.1:7901")
+    host = host.strip()
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    try:
+        number = int(port)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{port!r} in {text!r} is not a port number") from None
+    if not 1 <= number <= 65535:
+        raise argparse.ArgumentTypeError(f"{number} in {text!r} is not a port: use 1 to 65535")
+    return host or "127.0.0.1", number
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="glassesdata_receiver",
@@ -35,8 +63,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--print-pairing", action="store_true",
         help="with --wifi: print PAIRING_URI=<uri> on stdout once the listener accepts connections",
     )
-    parser.add_argument("--tcp", metavar="HOST:PORT", help="connect to a GDL1 sender over plain TCP (testing)")
-    parser.add_argument("--port", type=int, default=protocol.DEFAULT_PORT, help="link port (default %(default)s)")
+    parser.add_argument("--tcp", metavar="HOST:PORT", type=tcp_address, help="connect to a GDL1 sender over plain TCP (testing)")
+    parser.add_argument(
+        "--port", type=link_port, default=protocol.DEFAULT_PORT,
+        help="link port, 1-65535 (default %(default)s; 0 with --wifi alone: any free port)",
+    )
     parser.add_argument("--out", type=Path, default=paths.recordings_dir(), help="recordings folder (default %(default)s)")
     parser.add_argument("--record", action="store_true", help="start recording as soon as video arrives")
     parser.add_argument("--no-hands", action="store_true", help="disable hand tracking")
@@ -82,7 +113,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--no-bonjour", action="store_true", help="with --wifi: do not advertise on the local network")
     parser.add_argument("-v", "--verbose", action="store_true")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    uses_usb = args.usb or not (args.wifi or args.tcp)  # USB is the default link
+    if args.port == 0 and uses_usb:
+        parser.error("--port 0 (any free port) only works for the --wifi listener; over USB give the app's port (1-65535)")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -226,8 +261,8 @@ def _run(
     if args.tcp:
         from .link import TcpSource
 
-        host, _, port = args.tcp.rpartition(":")
-        start(TcpSource(receiver, host or "127.0.0.1", int(port), stop))
+        host, port = args.tcp  # checked by tcp_address
+        start(TcpSource(receiver, host, port, stop))
     if args.wifi or args.reset_pairing:
         from . import wifi
 

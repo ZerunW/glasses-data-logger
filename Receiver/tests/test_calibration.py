@@ -405,3 +405,161 @@ def test_end_to_end_calibration_over_http_and_a_recording_that_carries_both_file
             sender.terminate()
             sender.wait(5)
     assert receiver.returncode == 0
+
+
+# ---------------------------------------------------------------- review fixes: caps, model choice, gates, stale solutions
+
+
+def test_board_size_is_capped():
+    with pytest.raises(ValueError, match="device pixels per mm"):
+        cal.design_board(13.0, 2.0, (1240, 940))  # 26 device px per mm: no screen is that dense
+    with pytest.raises(ValueError, match="at most 16384"):
+        cal.design_board(12.0, 2.0, (20000, 20000))  # within the scale cap, but a giant image
+    spec = cal.design_board(6.04, 3.0, (1000, 2000))  # a dense phone screen is fine
+    assert spec.width_px * spec.height_px <= cal.MAX_BOARD_PIXELS
+
+
+def test_both_models_are_judged_on_the_same_views(spec, camera, monkeypatch):
+    samples = rendered_samples(spec, camera, 14, seed=4)
+    bad = cal.Sample(samples[0].corners + np.random.default_rng(1).normal(0, 6, samples[0].corners.shape).astype(np.float32),
+                     samples[0].ids, None, 0.0)
+    samples.append(bad)
+    solution = cal.solve(spec, samples, SIZE)
+    assert len(samples) - 1 not in solution.used  # the common outlier step dropped it, for both models
+    for fit in solution.fits.values():
+        assert fit is not None and len(fit.per_view_px) == len(solution.used)
+
+
+def test_each_folds_fisheye_fit_starts_from_that_folds_pinhole_fit(spec, camera, monkeypatch):
+    samples = rendered_samples(spec, camera, 10, seed=6)
+    objects, images = cal._points(spec.board(), samples)
+    calls = []
+    real_pinhole, real_fisheye = cal.fit_pinhole, cal.fit_fisheye
+
+    def pinhole(objs, imgs, size):
+        fit = real_pinhole(objs, imgs, size)
+        calls.append(("pinhole", len(objs), fit.K))
+        return fit
+
+    def fisheye(objs, imgs, size, guess=None):
+        calls.append(("fisheye", len(objs), guess))
+        return real_fisheye(objs, imgs, size, guess)
+
+    monkeypatch.setattr(cal, "fit_pinhole", pinhole)
+    monkeypatch.setattr(cal, "fit_fisheye", fisheye)
+    held = cal.cross_validate(objects, images, SIZE)
+    assert set(held) == {"pinhole", "fisheye"} and all(value is not None and value < 0.5 for value in held.values())
+    assert [name for name, _, _ in calls] == ["pinhole", "fisheye"] * cal.FOLDS
+    for (_, n_pinhole, K), (_, n_fisheye, guess) in zip(calls[::2], calls[1::2]):
+        assert n_pinhole == n_fisheye and guess is K  # same training views, started from that very fit
+
+
+def test_sanity_gates(spec, camera):
+    good = cal.Fit("pinhole", TRUE_K.copy(), TRUE_DIST.copy(), 0.2, [0.2])
+    assert cal.sanity_problems(good, *SIZE) == []
+    stretched = cal.Fit("pinhole", np.diag([600.0, 400.0, 1.0]) + np.array([[0, 0, 360], [0, 0, 640], [0, 0, 0]]), TRUE_DIST, 0.2, [0.2])
+    assert "fx / fy" in cal.sanity_problems(stretched, *SIZE)[0]
+    outside = cal.Fit("pinhole", np.array([[600.0, 0, 900], [0, 600, 640], [0, 0, 1]]), TRUE_DIST, 0.2, [0.2])
+    assert "principal point" in cal.sanity_problems(outside, *SIZE)[0]
+    noisy = cal.Fit("pinhole", TRUE_K.copy(), TRUE_DIST, 2.5, [2.5])
+    assert "reprojection error" in cal.sanity_problems(noisy, *SIZE)[0]
+    broken = cal.Fit("pinhole", np.full((3, 3), np.nan), TRUE_DIST, 0.2, [0.2])
+    assert cal.sanity_problems(broken, *SIZE) == ["the parameters are not finite numbers"]
+
+
+class FakeSession:
+    """A capture session reduced to what the service reads: its views and their generation."""
+
+    def __init__(self, spec, samples):
+        self.spec, self.samples, self.generation = spec, samples, 7
+        self.closed = False
+
+    def snapshot(self):
+        return SIZE, list(self.samples), self.generation
+
+    def status(self):
+        return {"generation": self.generation, "samples": len(self.samples)}
+
+    def set_capturing(self, on):
+        pass
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.fixture(scope="module")
+def few_samples(spec, camera):
+    return rendered_samples(spec, camera, 12, seed=2)
+
+
+def test_a_solution_goes_stale_when_the_views_change(spec, few_samples, tmp_path):
+    service = cal.CalibrationService(None, tmp_path)
+    service._session = FakeSession(spec, few_samples)
+    code, answer = service.solve()
+    assert code == 200 and answer["solution"]["stale"] is False and answer["solution"]["saveable"] is True
+    service._session.generation += 1  # capture resumed and kept another view
+    state = service.state()["session"]["solution"]
+    assert state["stale"] is True and state["saveable"] is False
+    code, answer = service.save()
+    assert code == 409 and "solve again" in answer["message"]
+    assert not (tmp_path / "calibration" / "current.json").exists()
+    assert service.solve()[0] == 200 and service.save()[0] == 200  # solved again: saveable
+    assert (tmp_path / "calibration" / "current.json").is_file()
+
+
+def test_a_solve_whose_session_was_reset_meanwhile_answers_409(spec, few_samples, tmp_path, monkeypatch):
+    service = cal.CalibrationService(None, tmp_path)
+    service._session = FakeSession(spec, few_samples)
+    real_solve = cal.solve
+
+    def solve_while_reset(*args, **kwargs):
+        result = real_solve(*args, **kwargs)
+        service.reset()  # the person pressed Start over while the solver ran
+        return result
+
+    monkeypatch.setattr(cal, "solve", solve_while_reset)
+    code, answer = service.solve()
+    assert code == 409 and "reset while solving" in answer["message"]
+    assert service.state()["session"] is None and service._solution is None
+
+
+def test_a_solution_that_fails_a_sanity_check_cannot_be_saved(spec, few_samples, tmp_path, monkeypatch):
+    monkeypatch.setattr(cal, "MAX_RMS_PX", 0.01)  # every fit now fails the error gate
+    service = cal.CalibrationService(None, tmp_path)
+    service._session = FakeSession(spec, few_samples)
+    code, answer = service.solve()
+    assert code == 200 and answer["solution"]["problems"] and answer["solution"]["saveable"] is False
+    assert "cannot be saved" in answer["message"]
+    code, answer = service.save()
+    assert code == 409 and "sanity check" in answer["message"]
+    assert not (tmp_path / "calibration" / "current.json").exists()
+
+
+@pytest.mark.parametrize("text", ["{}", '{"K": []}', "[1]", "not json", '{"width": 720, "height": 1280, "K": [[1, 0, 0], [0, 1, 0], [0, 0, 0]]}'])
+def test_a_malformed_current_calibration_is_reported_not_used(tmp_path, text):
+    folder = tmp_path / "calibration"
+    folder.mkdir()
+    (folder / "current.json").write_text(text)
+    service = cal.CalibrationService(None, tmp_path)
+    state = service.state()
+    assert state["current"] is None and "not used" in state["current_note"]
+    json.dumps(state, allow_nan=False)
+    store = cal.CalibrationStore(tmp_path)
+    assert store.current() is None
+    with pytest.raises(ValueError, match="not a valid calibration"):
+        store.save({"version": 1, "K": []})
+
+
+def test_after_a_pause_returns_no_view_is_kept(spec, camera):
+    rng = np.random.default_rng(12)
+    images = [camera.render(spec, r, t, rng) for r, t in synth.poses(spec, camera, 6, rng)]
+    session = cal.CaptureSession(StubReceiver(images), spec)
+    session.start()
+    try:
+        time.sleep(1.5)
+        session.set_capturing(False)
+        generation = session.generation
+        time.sleep(0.8)
+        assert session.generation == generation and session.snapshot()[2] == generation
+    finally:
+        session.close()

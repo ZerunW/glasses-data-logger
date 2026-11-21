@@ -158,6 +158,7 @@ class Receiver:
         self._latencies: deque[float] = deque(maxlen=48)
         self._phone_previous: tuple[int, dict[str, Any]] | None = None
         self._clock_offset_ns: int | None = None  # phone minus Mac, from the best PING/PONG sample
+        self._close_error: tuple[Path, str] | None = None  # the last recording that did not close cleanly
         self._inputs: deque[dict[str, Any]] = deque(maxlen=8)
         self._stop = threading.Event()
         self._decode_errors = 0  # written by the decode thread only
@@ -504,7 +505,9 @@ class Receiver:
         """Start or stop. Returns a message for people; logging is left to the helpers."""
         with self._lock:
             if self._recording is not None:
-                return f"Saved {self.stop_recording()}"
+                folder = self.stop_recording()
+                error = self.close_error(folder) if folder is not None else None
+                return f"Recording {folder} did not close cleanly: {error}" if error else f"Saved {folder}"
             path = self.start_recording()
             if path is None:
                 return f"Could not start recording: {self._why_not_recording()}"
@@ -545,6 +548,13 @@ class Receiver:
     def why_not_recording(self) -> str:
         with self._lock:
             return self._why_not_recording()
+
+    def close_error(self, folder: Path) -> str | None:
+        """Why ``folder`` did not close cleanly, if it was the last one that failed to."""
+        with self._lock:
+            if self._close_error is not None and self._close_error[0] == folder:
+                return self._close_error[1]
+            return None
 
     def shutdown(self) -> None:
         """Stop everything and wait for it, so no worker runs during interpreter teardown.
@@ -661,12 +671,18 @@ class Receiver:
         recording, self._recording = self._recording, None
         if recording is None:
             return None
+        failure: Exception | None = None
         try:
             recording.close()
         except Exception as error:
+            failure = error
             self._recording_failed(error)
         self._status.last_recording = recording.directory
         self._status.last_recording_s = recording.duration_s
         self._status.last_recording_frames = recording.frames_written
-        log.info("Saved %s", recording.directory)
+        if failure is None:
+            log.info("Saved %s", recording.directory)
+        else:  # info.json says so too (closeError): it is not reported as saved anywhere
+            self._close_error = (recording.directory, str(failure) or type(failure).__name__)
+            log.error("%s was not closed cleanly: %s", recording.directory, failure)
         return recording.directory
