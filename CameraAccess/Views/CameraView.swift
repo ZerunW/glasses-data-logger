@@ -9,29 +9,31 @@
 //
 // CameraView.swift
 //
-// The capture screen: a full-bleed camera preview with controls overlaid on a
-// scrim. Walks the SDK's camera lifecycle as explicit steps (Start Session →
-// Start Streaming → Capture / Record → Stop Streaming → End Session) and shows the
-// live DeviceSessionState / StreamState so the state machine is legible.
+// The capture screen, top to bottom with nothing stacked over the video: a status
+// header (glasses session, stream, computer link), the portrait glasses video beside
+// a column of live numbers, paged sensor cards, and the capture controls. Walks the
+// SDK's camera lifecycle as explicit steps (Start Session → Start Streaming → Capture
+// / Record → Stop Streaming → End Session).
+//
+// Performance: the video frame changes ~24 times a second, the fps once a second and
+// the sensors up to 10 times a second. This view reads none of those; each lives in a
+// small child view (`VideoStageView`, `LiveSummaryView`, `SensorCardsView`,
+// `StatusHeaderView`, `RecordingTimerLabel`) so an update re-renders only that child.
 //
 
-import AVFoundation
-import VisionKit
 import MWDATCore
 import SwiftUI
 import UIKit
 
-private let updateRequiredTitle = "Update required"
+let updateRequiredTitle = "Update required"
 
 struct CameraView: View {
   @State private var viewModel: CameraViewModel
   @Bindable var wearablesVM: WearablesViewModel
   @State private var showSettingsMenu: Bool = false
   @State private var isLaunchingUpdate: Bool = false
-  @State private var showBroadcast = false
-  @State private var showPairingScanner = false
-  @State private var pairingScanError: String?
-  @State private var scannedPairingCode = false
+  @State private var showFullScreenVideo = false
+  @State private var selectedCard: SensorCard = .motion
 
   init(wearables: WearablesInterface, wearablesVM: WearablesViewModel) {
     self._viewModel = State(wrappedValue: CameraViewModel(wearables: wearables))
@@ -50,10 +52,24 @@ struct CameraView: View {
 
   var body: some View {
     ZStack {
-      // Full-bleed preview (or a dark placeholder) fills the screen so overlaying
-      // the controls never reflows it.
-      previewBackground
-        .edgesIgnoringSafeArea(.all)
+      Color.black
+        .ignoresSafeArea()
+
+      VStack(spacing: 0) {
+        header
+          .fixedSize(horizontal: false, vertical: true)
+        // Everything between the header and the controls flexes; the header and the
+        // controls keep their natural height on every phone.
+        GeometryReader { proxy in
+          middle(MiddleLayout(size: proxy.size))
+        }
+        bottomBar
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      .overlay { settingsDismissLayer }
+      .overlayPreferenceValue(SettingsButtonAnchorKey.self) { anchor in
+        settingsMenu(below: anchor)
+      }
 
       if let preview = viewModel.activePreview {
         CapturePreviewView(
@@ -63,45 +79,18 @@ struct CameraView: View {
         .transition(.opacity)
         .zIndex(1)
       }
-
-      // Tap outside the open top-bar settings menu dismisses it.
-      if showSettingsMenu {
-        Color.clear
-          .contentShape(Rectangle())
-          .onTapGesture {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-              showSettingsMenu = false
-            }
-          }
-          .edgesIgnoringSafeArea(.all)
-      }
-
-      VStack(spacing: 0) {
-        topBar
-          .padding(.horizontal, 20)
-          .padding(.top, 16)
-          .padding(.bottom, 40)
-          .background(
-            LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .top, endPoint: .bottom)
-              .edgesIgnoringSafeArea(.top)
-          )
-
-        Spacer(minLength: 0)
-
-        SensorPanelView(sensorManager: viewModel.sensorManager, isRecording: viewModel.isRecording || viewModel.isPreparingRecording)
-          .padding(.horizontal, 20)
-          .padding(.bottom, 8)
-
-        bottomBar
-      }
     }
+    .environment(\.colorScheme, .dark)
     .animation(.spring(response: 0.42, dampingFraction: 0.86), value: viewModel.hasSession)
     .animation(.easeInOut(duration: 0.2), value: previewIsActive)
     .animation(.easeInOut(duration: 0.2), value: viewModel.isStreaming)
     .animation(.easeInOut(duration: 0.2), value: viewModel.isPaused)
     .animation(.easeInOut(duration: 0.2), value: viewModel.includeAudioInStream)
     .animation(.easeInOut(duration: 0.2), value: viewModel.isRecording)
-    .alert("Something went wrong", isPresented: $viewModel.showError) {
+    .animation(.easeInOut(duration: 0.2), value: viewModel.isComputerRecording)
+    // While the full-screen video is up it shows this alert itself (a covered view
+    // can't present), so this copy stands down.
+    .alert("Something went wrong", isPresented: errorAlertBinding) {
       Button("OK") { viewModel.dismissError() }
     } message: {
       Text(viewModel.errorMessage)
@@ -112,271 +101,128 @@ struct CameraView: View {
     } message: {
       Text("To preview your glasses camera, you'll be taken to the Meta AI app to grant access, then returned here.")
     }
-    .alert("Allow video connection?", isPresented: $viewModel.showBroadcastApproval) {
-      Button("Reject", role: .cancel) { viewModel.resolveBroadcastConnection(allow: false) }
-      Button("Allow") { viewModel.resolveBroadcastConnection(allow: true) }
-    } message: {
-      Text("A device at \(viewModel.broadcastPeer) wants to view your camera. Approve within 30 seconds. Video is sent only after you allow it. Only allow a connection you initiated.")
-    }
-    .sheet(isPresented: $showBroadcast, onDismiss: {
-      if viewModel.isPairing { viewModel.cancelPairing() }
-    }) {
-      NavigationStack {
-        Form {
-          Section("Mac camera") {
-            Label("GlassesData", systemImage: "video.badge.waveform")
-              .font(.headline)
-            Text("USB connects automatically. Pair your Mac once to use encrypted Wi-Fi. Keep this app in the foreground.")
-            Button(viewModel.isPairing ? "Cancel pairing" : "Pair a Mac") {
-              viewModel.isPairing ? viewModel.cancelPairing() : viewModel.beginPairing()
-            }.disabled(viewModel.isBroadcasting)
-            if let status = viewModel.pairingStatus { Text(status).font(.caption).foregroundStyle(.secondary) }
-            Button("Forget paired Mac", role: .destructive) { viewModel.forgetPairing() }
-              .disabled(viewModel.isBroadcasting || viewModel.isPairing)
-            Toggle("Use encrypted Wi-Fi", isOn: $viewModel.broadcastWiFiEnabled)
-              .disabled(viewModel.isBroadcasting)
-            Button(viewModel.isBroadcasting ? "Stop broadcast" : "Start broadcast") { viewModel.toggleBroadcast() }
-              .disabled(viewModel.isPairing || (!viewModel.isBroadcasting && !viewModel.isStreaming))
-            if let key = viewModel.broadcastPairingKey {
-              Text("Pairing key (keep private)").font(.caption)
-              Text(key).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
-            }
-            if let status = viewModel.broadcastStatus {
-              Text(status).textSelection(.enabled)
-              if status.contains(":7878") { ShareLink(item: status) }
-            }
-          }
-        }
-        .sheet(isPresented: $viewModel.showPairingCode) {
-          NavigationStack {
-            Form {
-              Section("Pair with Mac") {
-                Text("Enter the six-digit code shown on your Mac, or scan its QR code.")
-                TextField("Six-digit code", text: $viewModel.pairingCodeInput).keyboardType(.numberPad)
-                Button("Scan pairing QR code") {
-                  Task {
-                    guard DataScannerViewController.isSupported else { pairingScanError = "Scanning is unavailable on this device."; return }
-                    let authorized = await AVCaptureDevice.requestAccess(for: .video)
-                    guard authorized, DataScannerViewController.isAvailable else { pairingScanError = "Camera access is required to scan. You can enter the code instead."; return }
-                    showPairingScanner = true
-                  }
-                }
-                if let pairingScanError { Text(pairingScanError).foregroundStyle(.secondary) }
-                Button("Pair") { viewModel.confirmPairingCode() }
-              }
-            }
-            .navigationTitle("Pair with Mac")
-            .interactiveDismissDisabled()
-            .toolbar { Button("Cancel") { viewModel.cancelPairing() } }
-            .sheet(isPresented: $showPairingScanner, onDismiss: {
-              if scannedPairingCode {
-                scannedPairingCode = false
-                viewModel.confirmPairingCode()
-              }
-            }) {
-              NavigationStack {
-                PairingScanner { code in
-                  viewModel.pairingCodeInput = code
-                  scannedPairingCode = true
-                  showPairingScanner = false
-                }
-                .ignoresSafeArea(edges: .bottom)
-                .navigationTitle("Scan pairing code")
-                .toolbar { Button("Cancel") { showPairingScanner = false } }
-              }
-            }
-          }
-        }
-        .navigationTitle("Mac camera")
-        .toolbar { Button("Done") { showBroadcast = false } }
-        .alert("Allow video connection?", isPresented: $viewModel.showBroadcastApproval) {
-          Button("Reject", role: .cancel) { viewModel.resolveBroadcastConnection(allow: false) }
-          Button("Allow") { viewModel.resolveBroadcastConnection(allow: true) }
-        } message: {
-          Text("A device at \(viewModel.broadcastPeer) wants to view your camera. Approve within 30 seconds. Video is sent only after you allow it. Only allow a connection you initiated.")
-        }
+    .fullScreenCover(isPresented: $showFullScreenVideo) {
+      FullScreenVideoView(viewModel: viewModel, isUpdateRequired: isUpdateRequired) {
+        showFullScreenVideo = false
       }
+    }
+    // A finished recording's preview opens on this screen, so leave full screen for it.
+    .onChange(of: viewModel.activePreview != nil) { _, hasPreview in
+      if hasPreview { showFullScreenVideo = false }
     }
     .navigationBarHidden(true)
   }
 
-  // MARK: - Preview background
+  private var errorAlertBinding: Binding<Bool> {
+    Binding(
+      get: { viewModel.showError && !showFullScreenVideo },
+      set: { viewModel.showError = $0 }
+    )
+  }
 
+  // MARK: - Header
+
+  private var header: some View {
+    HStack(alignment: .center, spacing: 8) {
+      StatusHeaderView(viewModel: viewModel) {
+        withAnimation(.easeInOut(duration: 0.25)) { selectedCard = .computer }
+      }
+      Spacer(minLength: 0)
+      settingsButton
+    }
+    .padding(.leading, 16)
+    .padding(.trailing, 6)
+    .padding(.vertical, 6)
+  }
+
+  /// App-level settings (Disconnect). The menu itself is drawn by `settingsMenu`, over
+  /// the whole screen, so it isn't hidden behind the video below the header.
+  private var settingsButton: some View {
+    Button {
+      withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+        showSettingsMenu.toggle()
+      }
+    } label: {
+      Image(systemName: "gearshape")
+        .font(.system(size: 20))
+        .foregroundStyle(.white)
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+    }
+    .accessibilityLabel("Settings")
+    .accessibilityIdentifier("settings_button")
+    .anchorPreference(key: SettingsButtonAnchorKey.self, value: .bounds) { $0 }
+  }
+
+  /// Tap outside the open settings menu dismisses it.
   @ViewBuilder
-  private var previewBackground: some View {
-    ZStack {
-      Color.black
-      if viewModel.showsLivePreview {
-        // Live preview, the frozen last frame while paused, or the last frame held
-        // while the stream tears down — so the paused badge / stop loader overlays
-        // the preview rather than the start-streaming screen.
-        LivePreviewView(viewModel: viewModel)
-        if viewModel.isPaused {
-          // Dim the frozen frame so the badge reads as intentionally paused.
-          Color.black.opacity(0.35)
-          pausedOverlay
-        }
-      } else if !viewModel.isBusy {
-        statusPlaceholder
-      }
-
-      // Loader overlays whatever is behind it during any in-flight transition.
-      if viewModel.isBusy {
-        loadingOverlay
-      }
-    }
-  }
-
-  /// Label over the frozen preview while paused, so a held frame reads as
-  /// intentionally paused (with how to resume) rather than a stalled feed. A
-  /// `pause.fill` status glyph (not a circled/button shape) — resume is a glasses
-  /// gesture, not an on-screen control.
-  private var pausedOverlay: some View {
-    VStack(spacing: 8) {
-      Image(systemName: "pause.fill")
-        .font(.system(size: 36))
-        .foregroundStyle(.white)
-      Text("Paused")
-        .font(.system(size: 20, weight: .semibold))
-        .foregroundStyle(.white)
-      Text("Tap your glasses to resume.")
-        .font(.system(size: 15))
-        .multilineTextAlignment(.center)
-        .foregroundStyle(Color.white.opacity(0.7))
-    }
-    .padding(.horizontal, 24)
-    .accessibilityIdentifier("paused_overlay")
-  }
-
-  /// Dimmed spinner shown over the preview (or placeholder) while a session/stream
-  /// start or stop is in flight.
-  private var loadingOverlay: some View {
-    ZStack {
-      Color.black.opacity(0.35)
-      ProgressView()
-        .scaleEffect(1.5)
-        .tint(.white)
-    }
-  }
-
-  @ViewBuilder
-  private var statusPlaceholder: some View {
-    if !viewModel.hasActiveDevice {
-      placeholder(title: "Put on your glasses", subtitle: nil, showWaitingRow: true)
-    } else if isUpdateRequired {
-      placeholder(title: updateRequiredTitle, subtitle: "Apply the update to start your camera.", showWaitingRow: false)
-    } else if !viewModel.hasSession {
-      placeholder(title: "Ready", subtitle: "Start a session to connect to your glasses.", showWaitingRow: false)
-    } else if viewModel.isPaused {
-      placeholder(title: "Paused", subtitle: "Tap your glasses to resume.", showWaitingRow: false)
-    } else {
-      placeholder(title: "Session started", subtitle: "Start the preview to see the live camera feed.", showWaitingRow: false)
-    }
-  }
-
-  private func placeholder(title: String, subtitle: String?, showWaitingRow: Bool) -> some View {
-    VStack(spacing: 12) {
-      Image(.cameraAccessIcon)
-        .resizable()
-        .renderingMode(.template)
-        .foregroundStyle(.white)
-        .aspectRatio(contentMode: .fit)
-        .frame(width: 88)
-
-      Text(title)
-        .font(.system(size: 20, weight: .semibold))
-        .foregroundStyle(.white)
-
-      if let subtitle {
-        Text(subtitle)
-          .font(.system(size: 15))
-          .multilineTextAlignment(.center)
-          .foregroundStyle(Color.white.opacity(0.7))
-      }
-
-      if showWaitingRow {
-        HStack(spacing: 8) {
-          Image(systemName: "hourglass")
-            .resizable()
-            .aspectRatio(contentMode: .fit)
-            .foregroundStyle(Color.white.opacity(0.7))
-            .frame(width: 16, height: 16)
-          Text("Waiting for an active device")
-            .font(.system(size: 14))
-            .foregroundStyle(Color.white.opacity(0.7))
-        }
-      }
-    }
-    .padding(.horizontal, 24)
-  }
-
-  // MARK: - Top bar
-
-  /// Top bar: compact live SDK state stacked on the left so the lifecycle is
-  /// legible without heavy chrome, settings/disconnect on the right.
-  private var topBar: some View {
-    HStack(alignment: .top, spacing: 12) {
-      VStack(alignment: .leading, spacing: 6) {
-        statusChip(label: "Session", value: viewModel.sessionStateText, active: viewModel.isSessionActive, present: viewModel.hasSession)
-        statusChip(label: "Stream", value: viewModel.streamStateText, active: viewModel.isStreaming, present: viewModel.hasStream)
-      }
-
-      Spacer()
-
-      iconButton("video.badge.waveform", id: "mac_camera_button") { showBroadcast = true }
-
-      // Top bar carries only the app-level settings/Disconnect control.
-      iconButton("gearshape", id: "settings_button") {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-          showSettingsMenu.toggle()
-        }
-      }
-      .overlay(alignment: .trailing) {
-        if showSettingsMenu {
-          CustomButton(
-            title: "Disconnect",
-            style: .destructive,
-            isDisabled: wearablesVM.registrationState != .registered
-          ) {
-            wearablesVM.disconnectGlasses()
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showSettingsMenu = false }
+  private var settingsDismissLayer: some View {
+    if showSettingsMenu {
+      Color.clear
+        .contentShape(Rectangle())
+        .ignoresSafeArea()
+        .onTapGesture {
+          withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+            showSettingsMenu = false
           }
-          .frame(width: 120)
-          .offset(y: 44)
-          .transition(.scale(scale: 0.01, anchor: .topTrailing).combined(with: .opacity))
         }
+    }
+  }
+
+  /// The Disconnect button, dropped below the gear's right edge.
+  private func settingsMenu(below anchor: Anchor<CGRect>?) -> some View {
+    GeometryReader { proxy in
+      if showSettingsMenu, let anchor {
+        let gear = proxy[anchor]
+        CustomButton(
+          title: "Disconnect",
+          style: .destructive,
+          isDisabled: wearablesVM.registrationState != .registered
+        ) {
+          wearablesVM.disconnectGlasses()
+          withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) { showSettingsMenu = false }
+        }
+        .frame(width: 120)
+        .offset(x: gear.maxX - 120 - 10, y: gear.maxY)
+        .transition(.scale(scale: 0.01, anchor: .topTrailing).combined(with: .opacity))
       }
     }
   }
 
-  private func statusChip(label: String, value: String, active: Bool, present: Bool) -> some View {
-    HStack(spacing: 6) {
-      Circle()
-        .fill(active ? Color.green : (present ? Color.yellow : Color.gray))
-        .frame(width: 7, height: 7)
-      Text("\(label): \(value)")
-        .font(.system(size: 12, weight: .medium))
-        .monospaced()
-        .foregroundStyle(Color.white.opacity(0.85))
+  // MARK: - Video, summary and cards
+
+  private func middle(_ layout: MiddleLayout) -> some View {
+    VStack(spacing: MiddleLayout.spacing) {
+      HStack(alignment: .center, spacing: MiddleLayout.columnSpacing) {
+        videoBox
+          .frame(width: layout.videoWidth, height: layout.videoWidth * 16 / 9)
+        LiveSummaryView(viewModel: viewModel)
+          .frame(maxWidth: .infinity, maxHeight: .infinity)
+      }
+      .padding(.horizontal, MiddleLayout.horizontalInset)
+      .frame(height: layout.topHeight)
+
+      SensorCardsView(viewModel: viewModel, selection: $selectedCard)
+        .frame(height: layout.cardsHeight)
     }
+    .padding(.top, 4)
   }
 
-  private func iconButton(_ systemName: String, id: String, action: @escaping () -> Void) -> some View {
-    Button(action: action) {
-      Image(systemName: systemName)
-        .resizable()
-        .aspectRatio(contentMode: .fit)
-        .foregroundStyle(.white)
-        .frame(width: 22, height: 22)
-        .padding(.leading, 16)
-    }
-    .accessibilityIdentifier(id)
+  /// The glasses video (portrait, 9:16). Tapping it while there is a picture opens it
+  /// full screen.
+  private var videoBox: some View {
+    VideoStageView(viewModel: viewModel, style: .compact, isUpdateRequired: isUpdateRequired)
+      .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+      .contentShape(Rectangle())
+      .onTapGesture {
+        if viewModel.showsLivePreview { showFullScreenVideo = true }
+      }
   }
 
   // MARK: - Bottom bar
 
   private var bottomBar: some View {
-    VStack(spacing: 14) {
+    VStack(spacing: 12) {
       if isUpdateRequired {
         updateControls
       } else {
@@ -387,13 +233,15 @@ struct CameraView: View {
       }
     }
     .frame(maxWidth: .infinity)
-    .padding(.horizontal, 24)
-    .padding(.top, 20)
-    .padding(.bottom, 28)
-    .background(
-      LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .top, endPoint: .bottom)
-        .edgesIgnoringSafeArea(.bottom)
-    )
+    .padding(.horizontal, 16)
+    .padding(.top, 12)
+    .padding(.bottom, 12)
+    .background(Color.black)
+    .overlay(alignment: .top) {
+      Rectangle()
+        .fill(Color.white.opacity(0.12))
+        .frame(height: 0.5)
+    }
   }
 
   /// In-session toolbar (Preview / Photo / Record / Mic), kept laid out so the
@@ -410,11 +258,8 @@ struct CameraView: View {
     .opacity(viewModel.hasSession ? 1 : 0)
   }
 
-  /// Photo and Record need a live stream.
+  /// Photo needs a live stream.
   private var captureControlsEnabled: Bool { viewModel.isStreaming }
-  /// Record/Stop stays available while recording even if the stream is paused, so a
-  /// pause can't trap an in-progress recording; starting still needs a live stream.
-  private var recordControlEnabled: Bool { !viewModel.isFinalizingRecording && !viewModel.isPreparingRecording && (viewModel.isStreaming || viewModel.isRecording) }
   /// Mic additionally locks once recording starts — the audio setting can't change
   /// mid-take.
   private var micEnabled: Bool { viewModel.isStreaming && !viewModel.isRecording }
@@ -432,6 +277,7 @@ struct CameraView: View {
         .background(.ultraThinMaterial)
         .clipShape(Circle())
     }
+    .accessibilityLabel("Take photo")
     .accessibilityIdentifier("capture_button")
     .disabled(!captureControlsEnabled)
     .opacity(captureControlsEnabled ? 1 : 0.35)
@@ -458,7 +304,8 @@ struct CameraView: View {
 
   private var previewToggleDisabled: Bool {
     if previewIsActive {
-      return viewModel.isRecording || viewModel.isBusy
+      // A recording on either side needs the feed until it is stopped.
+      return viewModel.isAnyRecordingActive || viewModel.isBusy
     }
     return !viewModel.isSessionActive || viewModel.isBusy
   }
@@ -517,43 +364,10 @@ struct CameraView: View {
     .accessibilityIdentifier(id)
   }
 
-  /// Record/Stop capsule. Morphs in place while recording (red fill + the live timer
-  /// in the isolated `RecordingTimerLabel`) so the bar keeps its shape and the
-  /// per-frame timer doesn't re-render the surrounding controls.
+  /// Record/Stop capsule, in its own view: it reads the computer's recorder, which
+  /// changes every second while the computer records.
   private var recordPill: some View {
-    Button {
-      viewModel.toggleRecording()
-    } label: {
-      Group {
-        if viewModel.isRecording {
-          RecordingTimerLabel(viewModel: viewModel)
-        } else {
-          HStack(spacing: 8) {
-            Image(systemName: "video.fill")
-              .font(.system(size: 15, weight: .semibold))
-              .foregroundStyle(Color.recordAccent)
-            Text("Record")
-              .font(.system(size: 15, weight: .semibold))
-              .foregroundStyle(.white)
-          }
-        }
-      }
-      .frame(maxWidth: .infinity)
-      .frame(height: 50)
-      .background {
-        if viewModel.isRecording {
-          ZStack {
-            Capsule().fill(.ultraThinMaterial)
-            Capsule().fill(Color.recordAccent.opacity(0.50))
-          }
-        } else {
-          Capsule().fill(.ultraThinMaterial)
-        }
-      }
-    }
-    .accessibilityIdentifier("record_button")
-    .disabled(!recordControlEnabled)
-    .opacity(recordControlEnabled ? 1 : 0.35)
+    RecordPill(viewModel: viewModel)
   }
 
   /// Sound-in-video toggle. Brightens on, dims/slashes when muted; locked until
@@ -579,6 +393,7 @@ struct CameraView: View {
     }
     .disabled(!micEnabled)
     .opacity(micEnabled ? 1 : 0.35)
+    .accessibilityLabel(isOn ? "Sound on" : "Sound off")
     .accessibilityIdentifier("mic_toggle")
   }
 
@@ -599,63 +414,157 @@ struct CameraView: View {
   }
 }
 
-// MARK: - Live preview
+// MARK: - Layout
 
-/// The streaming preview image. Isolated from `CameraView` so frequent
-/// (~24fps) `currentVideoFrame` updates re-render only this view, not the
-/// surrounding controls.
-private struct LivePreviewView: View {
+/// Splits the height between the header and the controls into the video row and the
+/// cards. The video row aims for about 42% of a tall phone's screen; on a short phone
+/// it gives way first, so the cards keep at least ~170 pt and nothing scrolls.
+private struct MiddleLayout {
+  static let spacing: CGFloat = 10
+  static let horizontalInset: CGFloat = 16
+  static let columnSpacing: CGFloat = 12
+  /// The tab row (32 pt + 8 pt gap) plus a card of at least ~170 pt.
+  static let minCardsHeight: CGFloat = 210
+  static let minTopHeight: CGFloat = 150
+  /// Share of the middle area for the video row: on a 430×932 pt phone the middle is
+  /// ~640 pt, so this is ~350 pt, about 42% of the screen.
+  static let topShare: CGFloat = 0.55
+  /// Keeps the summary column readable when the box would otherwise be wide.
+  static let minSummaryWidth: CGFloat = 130
+
+  let topHeight: CGFloat
+  let cardsHeight: CGFloat
+  let videoWidth: CGFloat
+
+  init(size: CGSize) {
+    let available = max(0, size.height - 4 - Self.spacing)
+    let top = max(Self.minTopHeight, min(available * Self.topShare, available - Self.minCardsHeight))
+    topHeight = top
+    cardsHeight = max(0, available - top)
+    let widthForVideo = size.width - 2 * Self.horizontalInset - Self.columnSpacing - Self.minSummaryWidth
+    videoWidth = max(0, min(top * 9 / 16, widthForVideo))
+  }
+}
+
+/// Where the gear sits, so the Disconnect menu can be drawn over the whole screen.
+private struct SettingsButtonAnchorKey: PreferenceKey {
+  static var defaultValue: Anchor<CGRect>? { nil }
+
+  static func reduce(value: inout Anchor<CGRect>?, nextValue: () -> Anchor<CGRect>?) {
+    value = value ?? nextValue()
+  }
+}
+
+// MARK: - Record button
+
+/// Record/Stop capsule. Morphs in place while recording (red fill and the live timer),
+/// so the bar keeps its shape. A caption under the title says where a recording goes
+/// ("computer + iPhone") or, when there is nowhere to record, why it is disabled.
+/// Stop stays available while recording even if the stream is paused, so a pause can't
+/// trap a recording; starting needs a live stream.
+private struct RecordPill: View {
   var viewModel: CameraViewModel
 
   var body: some View {
-    if let videoFrame = viewModel.currentVideoFrame, viewModel.hasReceivedFirstFrame {
-      GeometryReader { geometry in
-        Image(uiImage: videoFrame)
-          .resizable()
-          .aspectRatio(contentMode: .fill)
-          .frame(width: geometry.size.width, height: geometry.size.height)
-          .clipped()
+    let control = viewModel.recordControl
+    Button {
+      viewModel.toggleRecording()
+    } label: {
+      HStack(spacing: 8) {
+        Image(systemName: control.mode == .stop ? "stop.fill" : "video.fill")
+          .font(.system(size: 15, weight: .semibold))
+          .foregroundStyle(Color.recordAccent)
+        VStack(alignment: .leading, spacing: 0) {
+          title(control)
+            .font(.system(size: 15, weight: .semibold))
+            .monospacedDigit()
+            .foregroundStyle(.white)
+          if let caption = control.caption {
+            // The words when they fit, otherwise a laptop and a phone glyph.
+            ViewThatFits(in: .horizontal) {
+              Text(verbatim: caption)
+              if !control.destinationSymbols.isEmpty {
+                Text(symbolCaption(control.destinationSymbols))
+              }
+            }
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(control.captionIsWarning ? Color.orange : Color.white.opacity(0.65))
+            .accessibilityLabel(Text(verbatim: caption))
+            .accessibilityIdentifier("record_caption")
+          }
+        }
+        .lineLimit(1)
+        .minimumScaleFactor(0.75)
+        // Dim the title of a disabled button, but keep a reason readable.
+        .opacity(control.isEnabled || control.captionIsWarning ? 1 : 0.6)
       }
+      .padding(.horizontal, 6)
+      .frame(maxWidth: .infinity)
+      .frame(height: 50)
+      .background {
+        if control.mode == .stop {
+          ZStack {
+            Capsule().fill(.ultraThinMaterial)
+            Capsule().fill(Color.recordAccent.opacity(0.50))
+          }
+        } else {
+          Capsule().fill(.ultraThinMaterial)
+        }
+      }
+    }
+    .accessibilityIdentifier("record_button")
+    .accessibilityHint(control.accessibilityHint ?? "")
+    .disabled(!control.isEnabled)
+    .opacity(control.isEnabled || control.captionIsWarning ? 1 : 0.35)
+  }
+
+  private func symbolCaption(_ symbols: [String]) -> LocalizedStringKey {
+    if symbols.count == 2 {
+      return "\(Image(systemName: symbols[0])) + \(Image(systemName: symbols[1]))"
+    }
+    return "\(Image(systemName: symbols[0]))"
+  }
+
+  /// "Record", or while recording the elapsed time: this iPhone's clock when it records,
+  /// otherwise the computer's.
+  @ViewBuilder
+  private func title(_ control: RecordControl) -> some View {
+    if control.mode == .start {
+      Text("Record")
+    } else if viewModel.isRecording {
+      // Counts from the actual recording start (first written frame), so it tracks the
+      // saved clip and keeps advancing through a pause; shows 00:00 until that frame.
+      // Identifier on the Text so UI tests find it regardless of the time value.
+      RecordingClockText(start: viewModel.recordingStartDate, identifier: "recording_indicator")
+    } else if case .recording(let state) = viewModel.computer.recorder {
+      Text(verbatim: state.seconds.formattedRecordingTime)
+        .accessibilityIdentifier("recording_indicator")
     } else {
-      ProgressView()
-        .scaleEffect(1.5)
-        .tint(.white)
+      Text("Stop")
     }
   }
 }
 
-// MARK: - Recording timer
-
-/// Elapsed-time label shown inside the record button while recording. Self-drives
-/// off the recording start via `TimelineView`, so it counts continuously — including
-/// through a stream pause — and re-renders only this isolated label.
-private struct RecordingTimerLabel: View {
-  var viewModel: CameraViewModel
+/// The elapsed recording time as `mm:ss`, ticking once a second from `start` (00:00
+/// until the first frame is written). `identifier` goes on the `Text` itself, so UI
+/// tests find it whatever the time.
+struct RecordingClockText: View {
+  let start: Date?
+  let identifier: String
 
   var body: some View {
-    HStack(spacing: 8) {
-      Image(systemName: "stop.fill")
-        .font(.system(size: 15, weight: .semibold))
-        .foregroundStyle(Color.recordAccent)
-      // Counts from the actual recording start (first written frame), so it tracks the
-      // saved clip and keeps advancing through a pause; shows 00:00 until that frame.
-      if let start = viewModel.recordingStartDate {
-        TimelineView(.periodic(from: start, by: 1)) { context in
-          timerText(context.date.timeIntervalSince(start))
-        }
-      } else {
-        timerText(0)
+    if let start {
+      TimelineView(.periodic(from: start, by: 1)) { context in
+        text(context.date.timeIntervalSince(start))
       }
+    } else {
+      text(0)
     }
   }
 
-  private func timerText(_ elapsed: TimeInterval) -> some View {
+  private func text(_ elapsed: TimeInterval) -> some View {
     Text(elapsed.formattedRecordingTime)
-      .font(.system(size: 15, weight: .semibold))
-      .monospacedDigit()
-      .foregroundStyle(.white)
-      // Identifier on the Text so UI tests find it regardless of the time value.
-      .accessibilityIdentifier("recording_indicator")
+      .accessibilityIdentifier(identifier)
   }
 }
 

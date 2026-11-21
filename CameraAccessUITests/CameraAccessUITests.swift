@@ -26,6 +26,10 @@ final class CameraAccessUITests: XCTestCase {
   /// skip the (otherwise wasted) wait for a prompt that will never reappear.
   private static var didAllowLocalNetwork = false
 
+  /// The app's USB listener port in these tests; the fake receiver connects to it.
+  private static let linkPort: UInt16 = 7912
+  private var receiver: FakeReceiver?
+
   override func setUp() async throws {
     continueAfterFailure = false
     removeStalePortFiles()
@@ -33,8 +37,13 @@ final class CameraAccessUITests: XCTestCase {
       try? FileManager.default.removeItem(atPath: portFilePath)
     }
 
-    app.launchArguments = ["--ui-testing"]
+    // Save on this iPhone is off by default; these tests record on the phone (except the
+    // one about having nowhere to save). The link stays in USB mode on its own port,
+    // where only `FakeReceiver` connects.
+    let saveOnPhone = name.contains("WithoutDestination") ? "NO" : "YES"
+    app.launchArguments = ["--ui-testing", "-saveOnThisPhone", saveOnPhone, "-linkMode", "usb"]
     app.launchEnvironment["MWDAT_TEST_SERVER_PORT_FILE"] = portFilePath
+    app.launchEnvironment[UITestLink.environmentKey] = String(Self.linkPort)
     app.launch()
 
     // Initialize the client *after* launch so the server has time to write the port file.
@@ -43,11 +52,21 @@ final class CameraAccessUITests: XCTestCase {
     XCTAssertTrue(serverReachable, "Test server should be running")
   }
 
-  override func tearDown() async throws {
-    cleanUpAppState()
+  /// Synchronous on purpose: after a failure XCTest runs tearDown from inside the
+  /// interrupted test's main-actor job, where an async tearDown could never start (it
+  /// needs that same actor), and the runner hung. XCTest calls this on the main thread.
+  override func tearDown() {
+    nonisolated(unsafe) let test = self
+    MainActor.assumeIsolated { test.tearDownOnMainActor() }
+    super.tearDown()
+  }
 
-    if pairedDeviceId != nil {
-      _ = await mockClient.unpairDevice(deviceId: pairedDeviceId)
+  private func tearDownOnMainActor() {
+    receiver?.disconnect()
+    receiver = nil
+    cleanUpAppState()
+    if let deviceId = pairedDeviceId, let client = mockClient {
+      waitForTeardownWork(timeout: 15) { _ = await client.unpairDevice(deviceId: deviceId) }
       pairedDeviceId = nil
     }
     app.terminate()
@@ -547,6 +566,88 @@ final class CameraAccessUITests: XCTestCase {
       "Stopping while paused should finalize the recording and open the capture preview"
     )
     app.buttons["close_preview_button"].tap()
+  }
+
+  // MARK: - Computer recording
+
+  /// The Record button drives the computer's recording over the link, and the phone
+  /// follows the computer's own state: a recording started on the computer shows here and
+  /// can be stopped from here, and a dropped link leaves its state unknown.
+  func testRecordButtonControlsComputerRecording() async {
+    await pairDeviceWithCameraResources()
+    startSessionAndStream()
+    let receiver = FakeReceiver(port: Self.linkPort)
+    self.receiver = receiver
+    receiver.start()
+    XCTAssertTrue(receiver.waitUntilConnected(timeout: 20), "The app should accept the receiver's connection")
+    let computer = app.buttons["computer_status_button"]
+    XCTAssertTrue(waitForLabel(computer, containing: "connected"), "The header should show the link as connected")
+
+    // Record starts the computer's recording and, with Save on this iPhone on, the phone's.
+    let record = app.buttons["record_button"]
+    XCTAssertTrue(waitForLabel(app.staticTexts["record_caption"], containing: "computer + iPhone"))
+    record.tap()
+    XCTAssertTrue(receiver.waitForCommand("record_start", timeout: 10), "Record should send record_start")
+    XCTAssertTrue(waitForLabel(computer, containing: ", recording "), "The header should show the computer recording")
+    XCTAssertTrue(waitUntilTimerCounting(app.staticTexts["recording_indicator"]), "The phone should record too")
+
+    // Stop stops both; the phone's clip opens in the preview.
+    record.tap()
+    XCTAssertTrue(receiver.waitForCommand("record_stop", timeout: 10), "Stop should send record_stop")
+    let closePreview = app.buttons["close_preview_button"]
+    XCTAssertTrue(closePreview.waitForExistence(timeout: 15), "The phone's recording should open in the preview")
+    closePreview.tap()
+    XCTAssertTrue(waitForLabel(computer, containing: "connected", excluding: ", recording "))
+
+    // Started on the computer (its web page): recording shows here, the phone doesn't record.
+    receiver.startRecordingFromComputer()
+    XCTAssertTrue(waitForLabel(computer, containing: ", recording "), "A computer-started recording should show")
+    XCTAssertTrue(waitForLabel(app.staticTexts["record_caption"], containing: "computer"))
+    XCTAssertFalse(app.staticTexts["summary_recording_time"].exists, "The phone shouldn't start its own recording")
+    record.tap()
+    XCTAssertTrue(receiver.waitForCommand("record_stop", count: 2, timeout: 10), "Stop should stop the computer")
+    XCTAssertTrue(waitForLabel(computer, containing: "connected", excluding: ", recording "))
+
+    // The link drops mid-recording: the state becomes unknown, nothing crashes.
+    receiver.startRecordingFromComputer()
+    XCTAssertTrue(waitForLabel(computer, containing: ", recording "))
+    receiver.disconnect()
+    XCTAssertTrue(waitForLabel(computer, containing: "recording state unknown"), "A lost link should read as unknown")
+    XCTAssertTrue(app.buttons["end_session_button"].isEnabled, "The app should stay usable")
+  }
+
+  /// With Save on this iPhone off and no computer, Record is disabled and says why.
+  func testRecordDisabledWithoutDestination() async {
+    await pairDeviceWithCameraResources()
+    startSessionAndStream()
+    let record = app.buttons["record_button"]
+    XCTAssertTrue(waitForLabel(app.staticTexts["record_caption"], containing: "nowhere to save"))
+    XCTAssertFalse(record.isEnabled, "Record needs a computer or Save on this iPhone")
+
+    // Turning on Save on this iPhone in the Storage card enables it.
+    app.buttons["card_tab_storage"].tap()
+    let toggle = app.switches["save_on_phone_toggle"]
+    XCTAssertTrue(toggle.waitForExistence(timeout: 5))
+    toggle.tap()
+    if (toggle.value as? String) != "1" { toggle.switches.firstMatch.tap() }
+    XCTAssertTrue(waitUntilEnabled(record), "Record should enable once the phone can save")
+    XCTAssertTrue(waitForLabel(app.staticTexts["record_caption"], containing: "iPhone"))
+  }
+
+  private func waitForLabel(
+    _ element: XCUIElement, containing text: String, excluding: String? = nil, timeout: TimeInterval = 10
+  ) -> Bool {
+    let predicate = NSPredicate { object, _ in
+      guard let label = (object as? XCUIElement)?.label else { return false }
+      return label.contains(text) && !(excluding.map { label.contains($0) } ?? false)
+    }
+    let expectation = XCTNSPredicateExpectation(predicate: predicate, object: element)
+    return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+  }
+
+  private func waitUntilEnabled(_ element: XCUIElement, timeout: TimeInterval = 10) -> Bool {
+    let expectation = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: element)
+    return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
   }
 
   /// Polls up to `maxSeconds` for the recording timer to start counting (first written

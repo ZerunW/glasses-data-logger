@@ -2,7 +2,8 @@ import AVFoundation
 import SwiftUI
 import VisionKit
 
-/// Scans the QR code containing the Mac's six-digit pairing code.
+/// Scans the pairing QR code the Mac receiver shows and hands back its `gdpair://` link.
+/// The link is validated by `LinkPairing(uri:)`, not here.
 struct PairingScanner: UIViewControllerRepresentable {
   let onCode: @MainActor (String) -> Void
   func makeCoordinator() -> Coordinator { Coordinator(onCode: onCode) }
@@ -35,7 +36,7 @@ struct PairingScanner: UIViewControllerRepresentable {
         guard case .barcode(let barcode) = item,
           let payload = barcode.payloadStringValue else { continue }
         let value = payload.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard value.utf8.count == 6, value.utf8.allSatisfy({ $0 >= 48 && $0 <= 57 }) else { continue }
+        guard value.lowercased().hasPrefix("\(LinkPairing.scheme)://") else { continue }
         handled = true
         scanner.stopScanning()
         onCode(value)

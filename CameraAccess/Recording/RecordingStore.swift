@@ -100,19 +100,7 @@ final class RecordingStore: @unchecked Sendable {
   }
 
   func appendInput(_ event: InputEvent, phoneTimeNs: UInt64) {
-    let type: String
-    let detail: String
-    switch event {
-    case .nav(let direction, _, _): type = "nav"; detail = String(describing: direction)
-    case .select: type = "select"; detail = ""
-    case .back: type = "back"; detail = ""
-    case .button(let button, _, _): type = "button"; detail = String(describing: button)
-    case .capture(let press, _, _): type = "capture"; detail = String(describing: press)
-    case .drag(let action, let x, let y, let dx, let dy, _, _):
-      type = "drag"; detail = "\(action) x=\(x) y=\(y) dx=\(dx) dy=\(dy)"
-    @unknown default:
-      type = "unknown"; detail = String(describing: event)
-    }
+    let (type, detail) = inputClassification(event)
     append("\(phoneTimeNs),\(event.timestampMs),\(csv(String(describing: event.source))),\(type),\(csv(detail))\n", to: "inputs.csv")
   }
 

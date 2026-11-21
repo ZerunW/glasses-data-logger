@@ -41,19 +41,24 @@
 		FA1100000000000000000002 /* MWDATInputs in Frameworks */ = {isa = PBXBuildFile; productRef = FA1200000000000000000002 /* MWDATInputs */; };
 		FA2200000000000000000001 /* CameraAccess/Sensors/SensorManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA2100000000000000000001 /* CameraAccess/Sensors/SensorManager.swift */; };
 		FA2200000000000000000002 /* CameraAccess/Sensors/SensorModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA2100000000000000000002 /* CameraAccess/Sensors/SensorModels.swift */; };
-		FA2200000000000000000003 /* CameraAccess/Views/SensorPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA2100000000000000000003 /* CameraAccess/Views/SensorPanelView.swift */; };
 		FA2200000000000000000004 /* CameraAccess/Recording/MonotonicClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA2100000000000000000004 /* CameraAccess/Recording/MonotonicClock.swift */; };
 		FA2200000000000000000005 /* CameraAccess/Recording/RecordingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA2100000000000000000005 /* CameraAccess/Recording/RecordingStore.swift */; };
 		FACE0000000000000000FA02 /* TipRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = FACE0000000000000000FA01 /* TipRow.swift */; };
-		FB2200000000000000000001 /* CameraAccess/Streaming/CameraBroadcast.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000001 /* CameraAccess/Streaming/CameraBroadcast.swift */; };
-		FB2200000000000000000002 /* CameraAccess/Streaming/IucmMessage.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000002 /* CameraAccess/Streaming/IucmMessage.swift */; };
-		FB2200000000000000000003 /* CameraAccess/Streaming/IucmFrameParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000003 /* CameraAccess/Streaming/IucmFrameParser.swift */; };
-		FB2200000000000000000004 /* CameraAccess/Streaming/SecureTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000004 /* CameraAccess/Streaming/SecureTransport.swift */; };
-		FB2200000000000000000005 /* CameraAccess/Streaming/PairingCryptography.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000005 /* CameraAccess/Streaming/PairingCryptography.swift */; };
-		FB2200000000000000000006 /* CameraAccess/Streaming/PairingConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000006 /* CameraAccess/Streaming/PairingConnection.swift */; };
-		FB2200000000000000000007 /* CameraAccess/Streaming/PairingHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000007 /* CameraAccess/Streaming/PairingHost.swift */; };
-		FB2200000000000000000008 /* CameraAccess/Streaming/PairingTrustStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000008 /* CameraAccess/Streaming/PairingTrustStore.swift */; };
 		FB2200000000000000000009 /* CameraAccess/Views/PairingScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000009 /* CameraAccess/Views/PairingScanner.swift */; };
+		FB220000000000000000000A /* CameraAccess/Streaming/LinkProtocol.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB210000000000000000000A /* CameraAccess/Streaming/LinkProtocol.swift */; };
+		FB220000000000000000000B /* CameraAccess/Streaming/LinkPairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB210000000000000000000B /* CameraAccess/Streaming/LinkPairing.swift */; };
+		FB220000000000000000000C /* CameraAccess/Streaming/LinkPairingStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB210000000000000000000C /* CameraAccess/Streaming/LinkPairingStore.swift */; };
+		FB220000000000000000000D /* CameraAccess/Streaming/LinkTLS.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB210000000000000000000D /* CameraAccess/Streaming/LinkTLS.swift */; };
+		FB220000000000000000000E /* CameraAccess/Streaming/ComputerLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB210000000000000000000E /* CameraAccess/Streaming/ComputerLink.swift */; };
+		FB220000000000000000000F /* CameraAccess/Streaming/LinkSensorEncoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB210000000000000000000F /* CameraAccess/Streaming/LinkSensorEncoding.swift */; };
+		FB2200000000000000000010 /* CameraAccess/Views/ComputerLinkCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000010 /* CameraAccess/Views/ComputerLinkCard.swift */; };
+		FB2200000000000000000011 /* CameraAccess/Views/StatusHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000011 /* CameraAccess/Views/StatusHeaderView.swift */; };
+		FB2200000000000000000012 /* CameraAccess/Views/LiveSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000012 /* CameraAccess/Views/LiveSummaryView.swift */; };
+		FB2200000000000000000013 /* CameraAccess/Views/SensorCardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000013 /* CameraAccess/Views/SensorCardsView.swift */; };
+		FB2200000000000000000014 /* CameraAccess/Views/VideoPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000014 /* CameraAccess/Views/VideoPanelView.swift */; };
+		FB2200000000000000000015 /* CameraAccess/Recording/RecordingLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000015 /* CameraAccess/Recording/RecordingLocation.swift */; };
+		FB2200000000000000000016 /* CameraAccess/ViewModels/RecordingControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000016 /* CameraAccess/ViewModels/RecordingControl.swift */; };
+		FB2200000000000000000017 /* CameraAccess/Views/StorageCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000017 /* CameraAccess/Views/StorageCard.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -120,20 +125,25 @@
 		E6DA451A2E79A63100E3F688 /* MockDeviceKitView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockDeviceKitView.swift; sourceTree = "<group>"; };
 		FA2100000000000000000001 /* CameraAccess/Sensors/SensorManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Sensors/SensorManager.swift; sourceTree = SOURCE_ROOT; };
 		FA2100000000000000000002 /* CameraAccess/Sensors/SensorModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Sensors/SensorModels.swift; sourceTree = SOURCE_ROOT; };
-		FA2100000000000000000003 /* CameraAccess/Views/SensorPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Views/SensorPanelView.swift; sourceTree = SOURCE_ROOT; };
 		FA2100000000000000000004 /* CameraAccess/Recording/MonotonicClock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Recording/MonotonicClock.swift; sourceTree = SOURCE_ROOT; };
 		FA2100000000000000000005 /* CameraAccess/Recording/RecordingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Recording/RecordingStore.swift; sourceTree = SOURCE_ROOT; };
 		FA2100000000000000000006 /* CameraAccess/PersonalTeam.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = CameraAccess/PersonalTeam.entitlements; sourceTree = SOURCE_ROOT; };
 		FACE0000000000000000FA01 /* TipRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TipRow.swift; sourceTree = "<group>"; };
-		FB2100000000000000000001 /* CameraAccess/Streaming/CameraBroadcast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/CameraBroadcast.swift; sourceTree = SOURCE_ROOT; };
-		FB2100000000000000000002 /* CameraAccess/Streaming/IucmMessage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/IucmMessage.swift; sourceTree = SOURCE_ROOT; };
-		FB2100000000000000000003 /* CameraAccess/Streaming/IucmFrameParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/IucmFrameParser.swift; sourceTree = SOURCE_ROOT; };
-		FB2100000000000000000004 /* CameraAccess/Streaming/SecureTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/SecureTransport.swift; sourceTree = SOURCE_ROOT; };
-		FB2100000000000000000005 /* CameraAccess/Streaming/PairingCryptography.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/PairingCryptography.swift; sourceTree = SOURCE_ROOT; };
-		FB2100000000000000000006 /* CameraAccess/Streaming/PairingConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/PairingConnection.swift; sourceTree = SOURCE_ROOT; };
-		FB2100000000000000000007 /* CameraAccess/Streaming/PairingHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/PairingHost.swift; sourceTree = SOURCE_ROOT; };
-		FB2100000000000000000008 /* CameraAccess/Streaming/PairingTrustStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/PairingTrustStore.swift; sourceTree = SOURCE_ROOT; };
 		FB2100000000000000000009 /* CameraAccess/Views/PairingScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Views/PairingScanner.swift; sourceTree = SOURCE_ROOT; };
+		FB210000000000000000000A /* CameraAccess/Streaming/LinkProtocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/LinkProtocol.swift; sourceTree = SOURCE_ROOT; };
+		FB210000000000000000000B /* CameraAccess/Streaming/LinkPairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/LinkPairing.swift; sourceTree = SOURCE_ROOT; };
+		FB210000000000000000000C /* CameraAccess/Streaming/LinkPairingStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/LinkPairingStore.swift; sourceTree = SOURCE_ROOT; };
+		FB210000000000000000000D /* CameraAccess/Streaming/LinkTLS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/LinkTLS.swift; sourceTree = SOURCE_ROOT; };
+		FB210000000000000000000E /* CameraAccess/Streaming/ComputerLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/ComputerLink.swift; sourceTree = SOURCE_ROOT; };
+		FB210000000000000000000F /* CameraAccess/Streaming/LinkSensorEncoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Streaming/LinkSensorEncoding.swift; sourceTree = SOURCE_ROOT; };
+		FB2100000000000000000010 /* CameraAccess/Views/ComputerLinkCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Views/ComputerLinkCard.swift; sourceTree = SOURCE_ROOT; };
+		FB2100000000000000000011 /* CameraAccess/Views/StatusHeaderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Views/StatusHeaderView.swift; sourceTree = SOURCE_ROOT; };
+		FB2100000000000000000012 /* CameraAccess/Views/LiveSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Views/LiveSummaryView.swift; sourceTree = SOURCE_ROOT; };
+		FB2100000000000000000013 /* CameraAccess/Views/SensorCardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Views/SensorCardsView.swift; sourceTree = SOURCE_ROOT; };
+		FB2100000000000000000014 /* CameraAccess/Views/VideoPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Views/VideoPanelView.swift; sourceTree = SOURCE_ROOT; };
+		FB2100000000000000000015 /* CameraAccess/Recording/RecordingLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Recording/RecordingLocation.swift; sourceTree = SOURCE_ROOT; };
+		FB2100000000000000000016 /* CameraAccess/ViewModels/RecordingControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/ViewModels/RecordingControl.swift; sourceTree = SOURCE_ROOT; };
+		FB2100000000000000000017 /* CameraAccess/Views/StorageCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Views/StorageCard.swift; sourceTree = SOURCE_ROOT; };
 		FC2100000000000000000001 /* Config/Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Signing.xcconfig; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
@@ -171,19 +181,24 @@
 			children = (
 				FC2100000000000000000001 /* Config/Signing.xcconfig */,
 				8FD96B7D2E6F0A9800F56AB1 /* CameraAccess */,
-				FB2100000000000000000001 /* CameraAccess/Streaming/CameraBroadcast.swift */,
-				FB2100000000000000000004 /* CameraAccess/Streaming/SecureTransport.swift */,
-				FB2100000000000000000005 /* CameraAccess/Streaming/PairingCryptography.swift */,
 				FB2100000000000000000009 /* CameraAccess/Views/PairingScanner.swift */,
-				FB2100000000000000000008 /* CameraAccess/Streaming/PairingTrustStore.swift */,
-				FB2100000000000000000007 /* CameraAccess/Streaming/PairingHost.swift */,
-				FB2100000000000000000006 /* CameraAccess/Streaming/PairingConnection.swift */,
-				FB2100000000000000000003 /* CameraAccess/Streaming/IucmFrameParser.swift */,
-				FB2100000000000000000002 /* CameraAccess/Streaming/IucmMessage.swift */,
+				FB210000000000000000000A /* CameraAccess/Streaming/LinkProtocol.swift */,
+				FB210000000000000000000B /* CameraAccess/Streaming/LinkPairing.swift */,
+				FB210000000000000000000C /* CameraAccess/Streaming/LinkPairingStore.swift */,
+				FB210000000000000000000D /* CameraAccess/Streaming/LinkTLS.swift */,
+				FB210000000000000000000E /* CameraAccess/Streaming/ComputerLink.swift */,
+				FB210000000000000000000F /* CameraAccess/Streaming/LinkSensorEncoding.swift */,
+				FB2100000000000000000010 /* CameraAccess/Views/ComputerLinkCard.swift */,
+				FB2100000000000000000011 /* CameraAccess/Views/StatusHeaderView.swift */,
+				FB2100000000000000000012 /* CameraAccess/Views/LiveSummaryView.swift */,
+				FB2100000000000000000013 /* CameraAccess/Views/SensorCardsView.swift */,
+				FB2100000000000000000014 /* CameraAccess/Views/VideoPanelView.swift */,
+				FB2100000000000000000015 /* CameraAccess/Recording/RecordingLocation.swift */,
+				FB2100000000000000000016 /* CameraAccess/ViewModels/RecordingControl.swift */,
+				FB2100000000000000000017 /* CameraAccess/Views/StorageCard.swift */,
 				FA2100000000000000000006 /* CameraAccess/PersonalTeam.entitlements */,
 				FA2100000000000000000005 /* CameraAccess/Recording/RecordingStore.swift */,
 				FA2100000000000000000004 /* CameraAccess/Recording/MonotonicClock.swift */,
-				FA2100000000000000000003 /* CameraAccess/Views/SensorPanelView.swift */,
 				FA2100000000000000000002 /* CameraAccess/Sensors/SensorModels.swift */,
 				FA2100000000000000000001 /* CameraAccess/Sensors/SensorManager.swift */,
 				E66CC00E2F3E05D900B07379 /* CameraAccessUITests */,
@@ -454,18 +469,23 @@
 			buildActionMask = 2147483647;
 			files = (
 				8FD96B7F2E6F0A9800F56AB1 /* CameraAccessApp.swift in Sources */,
-				FB2200000000000000000001 /* CameraAccess/Streaming/CameraBroadcast.swift in Sources */,
-				FB2200000000000000000004 /* CameraAccess/Streaming/SecureTransport.swift in Sources */,
-				FB2200000000000000000005 /* CameraAccess/Streaming/PairingCryptography.swift in Sources */,
 				FB2200000000000000000009 /* CameraAccess/Views/PairingScanner.swift in Sources */,
-				FB2200000000000000000008 /* CameraAccess/Streaming/PairingTrustStore.swift in Sources */,
-				FB2200000000000000000007 /* CameraAccess/Streaming/PairingHost.swift in Sources */,
-				FB2200000000000000000006 /* CameraAccess/Streaming/PairingConnection.swift in Sources */,
-				FB2200000000000000000003 /* CameraAccess/Streaming/IucmFrameParser.swift in Sources */,
-				FB2200000000000000000002 /* CameraAccess/Streaming/IucmMessage.swift in Sources */,
+				FB220000000000000000000A /* CameraAccess/Streaming/LinkProtocol.swift in Sources */,
+				FB220000000000000000000B /* CameraAccess/Streaming/LinkPairing.swift in Sources */,
+				FB220000000000000000000C /* CameraAccess/Streaming/LinkPairingStore.swift in Sources */,
+				FB220000000000000000000D /* CameraAccess/Streaming/LinkTLS.swift in Sources */,
+				FB220000000000000000000E /* CameraAccess/Streaming/ComputerLink.swift in Sources */,
+				FB220000000000000000000F /* CameraAccess/Streaming/LinkSensorEncoding.swift in Sources */,
+				FB2200000000000000000010 /* CameraAccess/Views/ComputerLinkCard.swift in Sources */,
+				FB2200000000000000000011 /* CameraAccess/Views/StatusHeaderView.swift in Sources */,
+				FB2200000000000000000012 /* CameraAccess/Views/LiveSummaryView.swift in Sources */,
+				FB2200000000000000000013 /* CameraAccess/Views/SensorCardsView.swift in Sources */,
+				FB2200000000000000000014 /* CameraAccess/Views/VideoPanelView.swift in Sources */,
+				FB2200000000000000000015 /* CameraAccess/Recording/RecordingLocation.swift in Sources */,
+				FB2200000000000000000016 /* CameraAccess/ViewModels/RecordingControl.swift in Sources */,
+				FB2200000000000000000017 /* CameraAccess/Views/StorageCard.swift in Sources */,
 				FA2200000000000000000005 /* CameraAccess/Recording/RecordingStore.swift in Sources */,
 				FA2200000000000000000004 /* CameraAccess/Recording/MonotonicClock.swift in Sources */,
-				FA2200000000000000000003 /* CameraAccess/Views/SensorPanelView.swift in Sources */,
 				FA2200000000000000000002 /* CameraAccess/Sensors/SensorModels.swift in Sources */,
 				FA2200000000000000000001 /* CameraAccess/Sensors/SensorManager.swift in Sources */,
 				8FD96B812E6F0A9800F56AB1 /* HomeScreenView.swift in Sources */,

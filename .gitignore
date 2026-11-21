@@ -30,9 +30,11 @@ Recordings/
 MacRelay/build/
 dist/
 
-# Python test caches
+# Python environments and caches
+.venv/
 __pycache__/
 *.pyc
+.pytest_cache/
 
 # Personal signing values (see Config/Signing.xcconfig)
 Config/Signing.local.xcconfig

@@ -17,9 +17,18 @@ final class SensorModelsTests: XCTestCase {
     XCTAssertNil(eulerDegrees(nil))
   }
 
+  func testInputsReadWithoutRawTimestamps() {
+    let event = InputEvent.nav(direction: .right, source: .captouch, timestampMs: 1_795_240_066_761)
+    XCTAssertEqual(inputDescription(event), "Navigation right · touchpad")
+    let input = SensorInput(event, time: Date())
+    XCTAssertEqual(input.title, "Navigation right")
+    XCTAssertEqual(input.source, "touchpad")
+    XCTAssertFalse(input.title.contains("1795240066761"))
+  }
+
   func testCapturePressesHaveDistinctLabels() {
-    XCTAssertTrue(inputDescription(.capture(.shortPress, source: .captureButton, timestampMs: 1)).contains("Short press"))
-    XCTAssertTrue(inputDescription(.capture(.hold, source: .captureButton, timestampMs: 2)).contains("Long press"))
-    XCTAssertTrue(inputDescription(.capture(.doublePress, source: .captureButton, timestampMs: 3)).contains("Double press"))
+    XCTAssertTrue(inputDescription(.capture(.shortPress, source: .captureButton, timestampMs: 1)).contains("short press"))
+    XCTAssertTrue(inputDescription(.capture(.hold, source: .captureButton, timestampMs: 2)).contains("long press"))
+    XCTAssertTrue(inputDescription(.capture(.doublePress, source: .captureButton, timestampMs: 3)).contains("double press"))
   }
 }

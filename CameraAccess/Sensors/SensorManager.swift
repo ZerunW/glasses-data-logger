@@ -39,9 +39,15 @@ final class SensorManager {
   var onMotion: (@Sendable (MWDATMotion.MotionSample, UInt64) -> Void)? { didSet { callbacks.setMotion(onMotion) } }
   var onInput: (@Sendable (MWDATInputs.InputEvent, UInt64) -> Void)? { didSet { callbacks.setInput(onInput) } }
   var onDeviceState: (@Sendable (MWDATCore.DeviceState, UInt64) -> Void)? { didSet { callbacks.setDevice(onDeviceState) } }
+  /// A second, independent set of receivers for the computer link. Called at the same
+  /// points as the recording callbacks above, with the same phone timestamp.
+  var onLinkMotion: (@Sendable (MWDATMotion.MotionSample, UInt64) -> Void)? { didSet { linkCallbacks.setMotion(onLinkMotion) } }
+  var onLinkInput: (@Sendable (MWDATInputs.InputEvent, UInt64) -> Void)? { didSet { linkCallbacks.setInput(onLinkInput) } }
+  var onLinkDeviceState: (@Sendable (MWDATCore.DeviceState, UInt64) -> Void)? { didSet { linkCallbacks.setDevice(onLinkDeviceState) } }
 
   var windowNowNs: UInt64 = MonotonicClock.nowNanoseconds()
   @ObservationIgnored private let callbacks = SensorCallbacks()
+  @ObservationIgnored private let linkCallbacks = SensorCallbacks()
   @ObservationIgnored private var timerTask: Task<Void, Never>?
   @ObservationIgnored private var motionGeneration = UUID()
   @ObservationIgnored private var session: DeviceSession?
@@ -66,6 +72,7 @@ final class SensorManager {
     lastDisplayUpdateNs = 0
     let current = generation
     let callbacks = self.callbacks
+    let linkCallbacks = self.linkCallbacks
     timerTask = Task { [weak self] in
       while !Task.isCancelled {
         try? await Task.sleep(for: .seconds(1))
@@ -77,6 +84,7 @@ final class SensorManager {
       deviceToken = device.addDeviceStateListener { [weak self] state in
         let time = MonotonicClock.nowNanoseconds()
         callbacks.emitDevice(state, time)
+        linkCallbacks.emitDevice(state, time)
         Task { @MainActor [weak self] in
           guard let self, self.generation == current else { return }
           self.latestDeviceState = state
@@ -107,9 +115,10 @@ final class SensorManager {
           guard !Task.isCancelled else { break }
           let time = MonotonicClock.nowNanoseconds()
           callbacks.emitInput(event, time)
+          linkCallbacks.emitInput(event, time)
           Task { @MainActor [weak self] in
             guard let self, self.generation == current else { return }
-            self.inputs.insert(SensorInput(text: inputDescription(event), time: Date()), at: 0)
+            self.inputs.insert(SensorInput(event, time: Date()), at: 0)
             if self.inputs.count > 20 { self.inputs.removeLast(self.inputs.count - 20) }
           }
         }
@@ -145,6 +154,7 @@ final class SensorManager {
     let current = generation
     let motionCurrent = motionGeneration
     let callbacks = self.callbacks
+    let linkCallbacks = self.linkCallbacks
     do {
       guard let capability = try session.addMotion(configuration: MotionConfiguration(samplingRate: rate)) else {
         motionError = "Unable to start Motion"; return
@@ -166,6 +176,7 @@ final class SensorManager {
           guard !Task.isCancelled else { break }
           let time = MonotonicClock.nowNanoseconds()
           callbacks.emitMotion(sample, time)
+          linkCallbacks.emitMotion(sample, time)
           Task { @MainActor [weak self] in
             guard let self, self.generation == current, self.motionGeneration == motionCurrent else { return }
             self.accept(sample, time: time)

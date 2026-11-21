@@ -10,10 +10,22 @@ struct SensorPoint: Identifiable {
   let z: Double
 }
 
+/// One glasses input for the Inputs card: what happened, where, and when on the phone's
+/// clock (the glasses' own millisecond timestamp goes to the logs, not the screen).
 struct SensorInput: Identifiable {
   let id = UUID()
-  let text: String
+  let title: String
+  let source: String
+  /// An SF Symbol for the kind of input.
+  let symbol: String
   let time: Date
+
+  init(_ event: InputEvent, time: Date) {
+    title = inputTitle(event)
+    source = inputSourceName(event.source)
+    symbol = inputSymbol(event)
+    self.time = time
+  }
 }
 
 struct EulerDegrees: Equatable {
@@ -34,23 +46,73 @@ func eulerDegrees(_ q: MWDATMotion.Quaternion?) -> EulerDegrees? {
   return EulerDegrees(roll: roll * 180 / .pi, pitch: pitch * 180 / .pi, yaw: yaw * 180 / .pi)
 }
 
+/// "Navigation right · touchpad": the event and where it came from, for VoiceOver and logs.
 func inputDescription(_ event: InputEvent) -> String {
-  let detail: String
+  "\(inputTitle(event)) · \(inputSourceName(event.source))"
+}
+
+/// What happened, in words: "Navigation right", "Capture long press", "Drag move".
+func inputTitle(_ event: InputEvent) -> String {
   switch event {
-  case .nav(let direction, _, _): detail = "Navigation \(direction)"
-  case .select: detail = "Select"
-  case .back: detail = "Back"
-  case .button(let button, _, _): detail = "Button \(button)"
+  case .nav(let direction, _, _): return "Navigation \(direction)"
+  case .select: return "Select"
+  case .back: return "Back"
+  case .button(let button, _, _): return "Button \(button)"
   case .capture(let press, _, _):
     switch press {
-    case .shortPress: detail = "Capture Short press"
-    case .hold: detail = "Capture Long press"
-    case .doublePress: detail = "Capture Double press"
-    @unknown default: detail = "Capture Unknown"
+    case .shortPress: return "Capture short press"
+    case .hold: return "Capture long press"
+    case .doublePress: return "Capture double press"
+    @unknown default: return "Capture"
     }
-  case .drag(let action, let x, let y, let dx, let dy, _, _):
-    detail = "Drag \(action) x:\(x) y:\(y) dx:\(dx) dy:\(dy)"
-  @unknown default: detail = "Unknown input"
+  case .drag(let action, _, _, _, _, _, _): return "Drag \(action)"
+  @unknown default: return "Unknown input"
   }
-  return "\(detail) · \(event.source) · \(event.timestampMs) ms"
+}
+
+func inputSourceName(_ source: InputSource) -> String {
+  switch source {
+  case .captouch: return "touchpad"
+  case .neuralBand: return "Neural Band"
+  case .captureButton: return "capture button"
+  case .actionButton: return "action button"
+  case .neuralBandDrag: return "Neural Band drag"
+  case .unknown: return "unknown"
+  @unknown default: return String(describing: source)
+  }
+}
+
+private func inputSymbol(_ event: InputEvent) -> String {
+  switch event {
+  case .nav(let direction, _, _):
+    switch direction {
+    case .up: return "arrow.up"
+    case .down: return "arrow.down"
+    case .left: return "arrow.left"
+    case .right: return "arrow.right"
+    @unknown default: return "arrow.up.and.down.and.arrow.left.and.right"
+    }
+  case .select: return "hand.tap"
+  case .back: return "arrow.uturn.backward"
+  case .button: return "button.programmable"
+  case .capture: return "camera"
+  case .drag: return "hand.draw"
+  @unknown default: return "questionmark"
+  }
+}
+
+/// The `type` and `detail` of an input event, shared by the phone's `inputs.csv` and the
+/// computer link's INPUT message so both describe events the same way.
+func inputClassification(_ event: InputEvent) -> (type: String, detail: String) {
+  switch event {
+  case .nav(let direction, _, _): return ("nav", String(describing: direction))
+  case .select: return ("select", "")
+  case .back: return ("back", "")
+  case .button(let button, _, _): return ("button", String(describing: button))
+  case .capture(let press, _, _): return ("capture", String(describing: press))
+  case .drag(let action, let x, let y, let dx, let dy, _, _):
+    return ("drag", "\(action) x=\(x) y=\(y) dx=\(dx) dy=\(dy)")
+  @unknown default:
+    return ("unknown", String(describing: event))
+  }
 }

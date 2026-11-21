@@ -60,19 +60,18 @@
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Needed to connect to Meta AI Glasses</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>Connect to your glasses and send the camera preview to your Mac on the local network.</string>
+	<string>Connect to your glasses, and connect to your computer to send it the glasses video and sensor data.</string>
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_bonjour._tcp</string>
 		<string>_glassesdata._tcp</string>
-		<string>_gdpair._tcp</string>
 	</array>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>Needed to connect to Meta AI Glasses</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>This app needs access to save photos captured from your glasses.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Use the iPhone camera to scan a Mac pairing code or provide a mock camera feed.</string>
+	<string>Use the iPhone camera to scan the pairing QR code shown on your computer, or to provide a mock camera feed.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>This app needs microphone access to record sound from your glasses' microphone alongside video.</string>
 	<key>UIApplicationSceneManifest</key>

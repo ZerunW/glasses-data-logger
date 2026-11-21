@@ -43,6 +43,19 @@ final class ViewModelIntegrationTests: XCTestCase {
     try await Task.sleep(nanoseconds: 1_000_000_000)
   }
 
+  /// A view model with its own settings and the computer link off. These tests are about
+  /// the glasses lifecycle; with the app's shared settings each one would also open the
+  /// USB link's listener on 127.0.0.1:7900, which the host app's own camera screen
+  /// already holds (so it retried every second), and which a receiver running on the Mac
+  /// could connect to, since the simulator shares the Mac's loopback address.
+  private func makeViewModel() -> CameraViewModel {
+    let suiteName = "ViewModelIntegrationTests"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defaults.removePersistentDomain(forName: suiteName)
+    defaults.set(LinkMode.off.rawValue, forKey: CameraViewModel.linkModeKey)
+    return CameraViewModel(wearables: Wearables.shared, defaults: defaults)
+  }
+
   override func tearDown() async throws {
     viewModel?.endSession()
     viewModel = nil
@@ -50,6 +63,24 @@ final class ViewModelIntegrationTests: XCTestCase {
     mockDevice = nil
     cameraKit = nil
     try await super.tearDown()
+  }
+
+  // MARK: - Settings
+
+  /// Recording on the phone uses a lot of space, so it is off until the user turns it on,
+  /// and the choice survives a relaunch.
+  func testSaveOnThisPhoneIsOffByDefaultAndPersisted() {
+    let suiteName = "ViewModelIntegrationTests.saveOnPhone"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defaults.removePersistentDomain(forName: suiteName)
+    defaults.set(LinkMode.off.rawValue, forKey: CameraViewModel.linkModeKey)
+    let first = CameraViewModel(wearables: Wearables.shared, defaults: defaults)
+    XCTAssertFalse(first.saveOnPhone)
+    XCTAssertTrue(first.recordingFolder.isAppFolder)
+    first.setSaveOnPhone(true)
+    let second = CameraViewModel(wearables: Wearables.shared, defaults: defaults)
+    XCTAssertTrue(second.saveOnPhone)
+    defaults.removePersistentDomain(forName: suiteName)
   }
 
   // MARK: - Video Streaming Flow Tests
@@ -69,7 +100,7 @@ final class ViewModelIntegrationTests: XCTestCase {
     // Setup camera feed
     camera.setCameraFeed(fileURL: videoURL)
 
-    let viewModel = CameraViewModel(wearables: Wearables.shared)
+    let viewModel = makeViewModel()
     self.viewModel = viewModel
 
     // Wait for the mock device to be detected
@@ -134,7 +165,7 @@ final class ViewModelIntegrationTests: XCTestCase {
     camera.setCameraFeed(fileURL: videoURL)
     camera.setCapturedImage(fileURL: imageURL)
 
-    let viewModel = CameraViewModel(wearables: Wearables.shared)
+    let viewModel = makeViewModel()
     self.viewModel = viewModel
 
     // Wait for the mock device to be detected
@@ -197,7 +228,7 @@ final class ViewModelIntegrationTests: XCTestCase {
 
     camera.setCameraFeed(fileURL: videoURL)
 
-    let viewModel = CameraViewModel(wearables: Wearables.shared)
+    let viewModel = makeViewModel()
     self.viewModel = viewModel
 
     await observeUntil(timeout: 5) { viewModel.hasActiveDevice }
@@ -241,7 +272,7 @@ final class ViewModelIntegrationTests: XCTestCase {
 
     camera.setCameraFeed(fileURL: videoURL)
 
-    let viewModel = CameraViewModel(wearables: Wearables.shared)
+    let viewModel = makeViewModel()
     self.viewModel = viewModel
 
     await observeUntil(timeout: 5) { viewModel.hasActiveDevice }

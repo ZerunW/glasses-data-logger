@@ -29,6 +29,10 @@ final class AudioCaptureHandler: Sendable {
   private static let streamingStalenessSeconds = 2.0
 
   private static let logger = Logger(subsystem: "com.meta.wearables.CameraAccess", category: "AudioCapture")
+  /// Runs every audio session / engine start and stop, for all recordings, in order: the
+  /// session is shared, so one recording's teardown (which deactivates it) must not
+  /// overtake the next recording's start.
+  private static let controlQueue = DispatchQueue(label: "GlassesData.AudioCapture.control", qos: .userInitiated)
 
   /// Outcome of attempting to append one gap-fill silence buffer.
   private enum SilenceFillOutcome {
@@ -85,7 +89,21 @@ final class AudioCaptureHandler: Sendable {
     }
   }
 
+  /// Starts capturing glasses-mic audio. Returns at once: configuring the audio session
+  /// (category, activation, the HFP route) and starting the engine are synchronous round
+  /// trips to the audio server that can take a second or more, and this is called on the
+  /// glasses frame thread, so doing them inline froze the video — preview, recording and
+  /// the computer link all stopped receiving frames until they returned. The audio track
+  /// is timed from `recordingStartTime`, so audio that starts a moment later stays aligned.
   func start() {
+    Self.controlQueue.async { [self] in
+      // A recording stopped before its audio came up needs no audio.
+      guard !state.withLockUnchecked({ $0.isFinished }) else { return }
+      startCapture()
+    }
+  }
+
+  private func startCapture() {
     // Snapshot the handler, then drive it outside the lock: it installs the tap, whose
     // callback re-enters this lock via processAudioBuffer — holding the lock would deadlock.
     let handler = state.withLockUnchecked { $0.audioInputHandler }
@@ -106,16 +124,23 @@ final class AudioCaptureHandler: Sendable {
     handler.startListening()
   }
 
+  /// Finishes the audio track at once, so the writer can finalize without waiting for the
+  /// audio server, then stops the engine after any start still in progress.
   func stop() {
-    // Tear down outside the lock (engine.stop() can flush a last tap callback that
-    // re-enters it). Then set isFinished under the append lock, so no late buffer
-    // appends after markAsFinished().
-    let handler = state.withLockUnchecked { $0.audioInputHandler }
-    handler.stopListening()
-    handler.cleanup()
-    state.withLockUnchecked { state in
-      state.isFinished = true
-      state.audioInput.markAsFinished()
+    // Set isFinished under the append lock first, so no late buffer appends after
+    // markAsFinished(); buffers the engine still delivers are dropped.
+    let handler = state.withLockUnchecked { state -> AudioInputHandler in
+      if !state.isFinished {
+        state.isFinished = true
+        state.audioInput.markAsFinished()
+      }
+      return state.audioInputHandler
+    }
+    // Tear down on the control queue, outside the lock (engine.stop() can flush a last
+    // tap callback that re-enters it).
+    Self.controlQueue.async {
+      handler.stopListening()
+      handler.cleanup()
     }
   }
 
