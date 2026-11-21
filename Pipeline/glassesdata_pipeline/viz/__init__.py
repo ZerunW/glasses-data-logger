@@ -4,16 +4,22 @@
 * :mod:`.rerun_export` - ``derived/viz/episode.rrd`` for the Rerun viewer (needs ``rerun-sdk``,
   pinned in ``requirements.txt``).
 * :func:`main` - the ``view`` command: ``python -m glassesdata_pipeline view REC`` opens the
-  recording's ``.rrd`` in the Rerun viewer, or prints how when it or ``rerun-sdk`` is missing.
+  recording's ``.rrd`` in the Rerun viewer, or prints how when it or ``rerun-sdk`` is missing. The
+  viewer keeps its settings, UI state and analytics switch in the XDG config/data folders on
+  Linux; :func:`viewer_environment` points them into ``local/cache/rerun-viewer`` (on macOS the
+  viewer uses ``~/Library/Application Support/rerun``, which no variable moves).
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+from .. import paths
 
 RERUN_PIN = "rerun-sdk==0.43.2"
 RRD_NAME = "viz/episode.rrd"
@@ -24,6 +30,16 @@ def _rrd_for(target: Path) -> tuple[Path, Path | None]:
     if target.suffix == ".rrd":
         return target, None
     return target / "derived" / RRD_NAME, target
+
+
+def viewer_environment() -> dict[str, str]:
+    """The environment for the Rerun viewer: XDG config/data folders in ``local/cache/rerun-viewer``
+    (variables that are already set win)."""
+    env = dict(os.environ)
+    home = paths.cache_dir() / "rerun-viewer"
+    env.setdefault("XDG_CONFIG_HOME", str(home / "config"))
+    env.setdefault("XDG_DATA_HOME", str(home / "data"))
+    return env
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -77,4 +93,4 @@ def main(argv: list[str] | None = None) -> int:
     if not have_rerun:
         print(f"rerun-sdk is not installed here. Install it (pip install {RERUN_PIN}) and run:\n  rerun {rrd}")
         return 2
-    return subprocess.call(command)
+    return subprocess.call(command, env=viewer_environment())

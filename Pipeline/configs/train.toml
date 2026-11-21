@@ -24,7 +24,7 @@ init_at_random_ep_len = false  # rsl_rl's random initial episode length (not nee
 [train.scene]
 xml = ""                   # use this MJCF instead of composing sim/scene.xml + robot (then set the names below)
 base_body = "auto"         # floating base body: "palm" | "forearm"; "auto" = what the retarget step used
-menagerie_path = ""        # mujoco_menagerie clone; "" = retarget.menagerie_path
+menagerie_path = ""        # mujoco_menagerie clone (relative to the repository root); "" = retarget.menagerie_path
 root_body = ""             # (xml only) hand root body with the free joint or the 6 base joints
 mocap_body = ""            # (xml only) mocap body welded to the root
 tip_sites = []             # (xml only) fingertip site names

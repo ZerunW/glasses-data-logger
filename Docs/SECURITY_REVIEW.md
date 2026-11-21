@@ -210,14 +210,15 @@ Limits:
 
 **Receiver.**
 
-- State directory: `~/Library/Application Support/GlassesData` (macOS) or
-  `$XDG_STATE_HOME/glassesdata` (Linux, default `~/.local/state/glassesdata`). It is set to 0700
+- State directory: `local/state` in the repository (macOS and Linux; the project keeps nothing
+  outside its folder). If the repository sits in a synced folder such as OneDrive, the Wi-Fi
+  identity's private key and pairing token are uploaded with it. It is set to 0700
   only when the Wi-Fi identity is loaded (`--wifi` or `--reset-pairing`); a receiver that never
   ran with `--wifi` leaves the directory at the umask default. Files in it: the identity (above),
   `calibration/calibration_<UTC>.json`, `calibration/current.json`, `calibration/screen.json` and
   `profile.json`, all written through `tempfile.mkstemp` (mode 0600) and an atomic rename.
-- Recordings: `~/Movies/GlassesData` (macOS; `~/Movies` is 0700 on the development Mac) or
-  `~/Videos/GlassesData` (Ubuntu, or the localised Videos folder). `calibration.json`,
+- Recordings: `local/recordings` in the repository (synced along with it when the repository is
+  in a synced folder). `calibration.json`,
   `profile.json` and `info.json` are written through `tempfile.mkstemp` and an atomic rename, so
   they are 0600; `video.mp4`, the CSVs and the folders follow the umask and the parent folders'
   permissions. Nothing is encrypted by the receiver; rely on FileVault or LUKS full-disk
@@ -270,7 +271,7 @@ Limits:
     `from_pretrained` (model name, no pinned revision), SAM 2 `from_pretrained`, HaMeR's detector
     weights, and the WiLoR / Video Depth Anything / MANO files that are downloaded by hand.
     `Pipeline/scripts/setup_ubuntu.sh --models` fetches the Depth Anything V2 and SAM 2.1 weights
-    and the MediaPipe model ahead of time (about 2.8 GB into `~/.cache`). Most checkpoints are
+    and the MediaPipe model ahead of time (about 2.8 GB into the repository's `local/cache`). Most checkpoints are
     pickles (`.pt`, `.ckpt`, `.pkl`), which can run code when loaded: download them only from the
     official sources;
   - installation (not runtime): `Pipeline/scripts/setup_ubuntu.sh` installs PyPI packages pinned in

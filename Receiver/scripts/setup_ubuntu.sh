@@ -15,7 +15,7 @@
 #   --latest       install the newest versions requirements.txt allows, not the tested ones
 #   -h, --help     show this help
 #
-# Environment: GLASSESDATA_VENV (default ~/.venvs/glassesdata-receiver),
+# Environment: GLASSESDATA_VENV (default local/venv in the repository),
 #              GLASSESDATA_PYTHON (default python3, Ubuntu 24.04's Python 3.12).
 #
 # Written on a Mac and checked with bash -n; see the README (Ubuntu 24.04) for what it does by hand.
@@ -25,10 +25,13 @@ set -euo pipefail
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 RECEIVER_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd)
 readonly SCRIPT_DIR RECEIVER_DIR
-VENV=${GLASSESDATA_VENV:-$HOME/.venvs/glassesdata-receiver}
+REPO_DIR=$(cd -- "$RECEIVER_DIR/.." && pwd)
+VENV=${GLASSESDATA_VENV:-$REPO_DIR/local/venv}
 PYTHON=${GLASSESDATA_PYTHON:-python3}
 VENV_PY="$VENV/bin/python"
-readonly VENV PYTHON VENV_PY
+readonly REPO_DIR VENV PYTHON VENV_PY
+# The project keeps nothing outside its folder: pip's download cache too.
+export PIP_CACHE_DIR=${PIP_CACHE_DIR:-$REPO_DIR/local/cache/pip}
 
 # The virtual camera device: /dev/video10, labelled GlassesData in Zoom, Meet and OBS.
 readonly LOOPBACK_OPTIONS="devices=1 video_nr=10 card_label=GlassesData exclusive_caps=1"

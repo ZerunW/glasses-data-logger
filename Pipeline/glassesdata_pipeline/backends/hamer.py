@@ -8,16 +8,17 @@ joints (extra array ``joints_cam_model[T,2,21,3]``). ``mp_world`` is filled with
 relative to their palm centre, so step ``hand3d`` works unchanged (``shape_frame = "auto"`` treats
 them as camera-aligned).
 
-Install (outside this repository)::
+Install (into the repository's gitignored ``local/src``; ``scripts/setup_ubuntu.sh --with-hamer`` does it)::
 
-    git clone --recursive https://github.com/geopavlakos/hamer && cd hamer
+    git clone --recursive https://github.com/geopavlakos/hamer local/src/hamer && cd local/src/hamer
     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121   # match the driver
     pip install -e .[all]
     pip install -v -e third-party/ViTPose        # only for hamer_detector = "vitpose"
     bash fetch_demo_data.sh                      # checkpoints into ./_DATA
     # MANO: register at https://mano.is.tue.mpg.de, download, put MANO_RIGHT.pkl in _DATA/data/mano/
 
-then ``hands2d.backend = "hamer"``, ``hands2d.repo_dir = "/path/to/hamer"``.
+then ``hands2d.backend = "hamer"`` (``hands2d.repo_dir = ""`` finds ``local/src/hamer``, or
+``$GLASSESDATA_SRC/hamer``; another clone: set ``hands2d.repo_dir``, relative to the repository root).
 
 Hand boxes (``hands2d.hamer_detector``):
 
@@ -49,6 +50,7 @@ from typing import Any
 
 import numpy as np
 
+from .. import paths
 from ..errors import MissingDependency, PipelineError, require
 from . import mediapipe_hands as mph
 
@@ -67,10 +69,13 @@ def working_dir(path: Path) -> Iterator[None]:
         os.chdir(old)
 
 
-def repo_dir(hcfg: Mapping[str, Any], marker: str, name: str) -> Path:
-    repo = Path(str(hcfg.get("repo_dir", "") or ".")).expanduser().resolve()
+def repo_dir(hcfg: Mapping[str, Any], marker: str, name: str, folder: str) -> Path:
+    """``hands2d.repo_dir`` (relative to the repository root), or ``paths.src_dir() / folder`` when empty."""
+    value = str(hcfg.get("repo_dir", "") or "")
+    repo = (paths.resolve(value) if value else paths.src_dir() / folder).resolve()
     if not (repo / marker).exists():
-        raise MissingDependency(f"{name} repository not found in {repo} (no {marker}); clone it and set hands2d.repo_dir "
+        raise MissingDependency(f"{name} repository not found in {repo} (no {marker}); clone it there "
+                                f"(scripts/setup_ubuntu.sh --with-{name.lower()}) or set hands2d.repo_dir "
                                 f"(needed for hands2d backend {name.lower()})")
     if str(repo) not in sys.path:
         sys.path.insert(0, str(repo))
@@ -224,7 +229,7 @@ def vitpose_boxes(repo: Path, device: str, min_keypoint_conf: float = 0.5) -> Ca
 
 def hands2d(ep: Any, cfg: Mapping[str, Any]) -> dict[str, np.ndarray]:
     hcfg = cfg.get("hands2d", {}) or {}
-    repo = repo_dir(hcfg, "hamer", "HaMeR")
+    repo = repo_dir(hcfg, "hamer", "HaMeR", "hamer")
     require("torch", "torch", "hands2d backend hamer")
     try:
         from hamer.datasets.vitdet_dataset import ViTDetDataset  # type: ignore[import-not-found]

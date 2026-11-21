@@ -12,22 +12,28 @@ The receiver is a command-line process; it never opens a window. Open the page i
 
 ## Setup
 
-Python 3.11 on macOS; on Ubuntu 24.04 its own Python 3.12, set up by one script (see Ubuntu 24.04). Create the virtual environment **outside** any cloud-synced folder (OneDrive, iCloud Drive, Dropbox): syncing thousands of small files breaks or slows the environment.
+Python 3.11 on macOS; on Ubuntu 24.04 its own Python 3.12, set up by one script (see Ubuntu 24.04). The project keeps nothing outside its own folder: the virtual environment, like everything else this machine stores for it, goes in the repository's gitignored `local/` folder.
 
 ```sh
-python3.11 -m venv ~/.venvs/glassesdata-receiver
-~/.venvs/glassesdata-receiver/bin/pip install -r requirements.txt        # requirements-dev.txt adds pytest
+python3.11 -m venv ../local/venv
+../local/venv/bin/pip install -r requirements.txt        # requirements-dev.txt adds pytest
 ```
 
-Run everything from this `Receiver/` folder with that interpreter (below, `python` means `~/.venvs/glassesdata-receiver/bin/python`). The first run downloads the hand model (see Folders).
+Run everything from this `Receiver/` folder with that interpreter (below, `python` means `../local/venv/bin/python`; or `source ../local/venv/bin/activate` once). The first run downloads the hand model (see Folders).
+
+If the repository sits in a synced folder (OneDrive, iCloud Drive, Dropbox), keep `local/` downloaded: in Finder, right-click it and choose "Always Keep on This Device". A file the sync service has turned into a cloud-only placeholder makes Python start slowly or fail to import.
 
 ### Folders
 
-| | macOS | Linux |
-|---|---|---|
-| recordings (`--out`) | `~/Movies/GlassesData` | `GlassesData` in the desktop's Videos folder: `~/Videos/GlassesData`, or the folder's name in the session's language (`XDG_VIDEOS_DIR` in `~/.config/user-dirs.dirs`, such as `~/视频/GlassesData`) |
-| state (`--state-dir`): Wi-Fi identity, `calibration/`, `profile.json` | `~/Library/Application Support/GlassesData` | `$XDG_STATE_HOME/glassesdata` (default `~/.local/state/glassesdata`) |
-| hand model cache | `~/Library/Caches/GlassesData` | `$XDG_CACHE_HOME/glassesdata` (default `~/.cache/glassesdata`) |
+Everything is inside the repository's `local/` folder, on macOS and Linux alike:
+
+| | folder |
+|---|---|
+| recordings (`--out`) | `local/recordings` |
+| state (`--state-dir`): Wi-Fi identity, `calibration/`, `profile.json` | `local/state` |
+| hand model cache | `local/cache` |
+| Python environment | `local/venv` |
+| test runs' temporary files | `local/tmp` |
 
 ## The web page
 
@@ -36,7 +42,7 @@ python -m glassesdata_receiver --usb            # prints WEB_URL=http://127.0.0.
 python -m glassesdata_receiver --usb --open     # also opens it in the default browser
 ```
 
-A dark monitoring surface (it follows the browser's light or dark setting), made to stay open on a second screen. Left: the video at its own aspect (9:16 for the glasses), as tall as the window allows, with the hand skeleton drawn by the browser (crisp at any size; cyan L for the left hand, pink R for the right), and under it the transport bar: the round Record button, the timer, frames and folder while recording, the hand-tracking toggle, the virtual camera toggle and, with `--wifi`, Pair. When no iPhone is connected, the video area lists numbered steps for each enabled link (USB, Wi-Fi) with its live state. Right, scrolling on its own: the **signal chain** Glasses → iPhone → Computer → Decode → Hands, each hop with its frame rate against the configured one, a 20 s sparkline, and amber or red with the reason in words when it falls behind ("Phone dropped 12 frames in 10 s"); then Virtual camera (see below); then Link (phone → computer delay chart, round trip, how far the preview is behind, the phone's video queue, its drop episodes and whether it buffers or drops when the link is slow, each link's state), Hands (rate, time per frame, each hand's confidence, whether the skeleton belongs to the frame it is drawn on), Glasses (battery ring, worn / hinge / thermal / link, recent inputs), Camera calibration and Body measurements (see below), Motion (accel, gyro and magnetometer, x/y/z over 20 s) and the recordings, newest first. When the live picture is more than 0.5 s behind real time, an amber "Preview 1.3 s behind" appears in the top bar (red beyond 3 s) and in the signal chain's summary, never over the video; the iPhone hop says when frames queue on the phone. Keys: `R` record, `H` hand tracking, `V` virtual camera, `P` pairing. The page needs no internet connection and stacks vertically on a phone, with the transport bar pinned to the bottom.
+A dark monitoring surface (it follows the browser's light or dark setting), made to stay open on a second screen. Left: the video at its own aspect (9:16 for the glasses), as tall as the window allows, with the hand skeleton drawn by the browser (crisp at any size; cyan L for the left hand, pink R for the right), and under it the transport bar: the round Record button, the timer, frames and folder while recording, the hand-tracking toggle, the virtual camera toggle and, with `--wifi`, Pair. When no iPhone is connected, the video area lists numbered steps for each enabled link (USB, Wi-Fi) with its live state. Right, scrolling on its own: the **signal chain** Glasses → iPhone → Computer → Decode → Hands, each hop with its frame rate against the configured one, a 20 s sparkline, and amber or red with the reason in words when it falls behind ("Phone dropped 12 frames in 10 s"); then Virtual camera (see below); then Link (phone → computer delay chart, round trip, how far the preview is behind, the phone's video queue, its drop episodes and whether it buffers or drops when the link is slow, each link's state), Hands (rate, time per frame, each hand's confidence, whether the skeleton belongs to the frame it is drawn on), Glasses (battery ring, worn / hinge / thermal / link, recent inputs), Camera calibration and Body measurements (see below), Motion (accel and gyro, x/y/z over 20 s, plus the magnetometer once the source reports one) and the recordings, newest first. When the live picture is more than 0.5 s behind real time, an amber "Preview 1.3 s behind" appears in the top bar (red beyond 3 s) and in the signal chain's summary, never over the video; the iPhone hop says when frames queue on the phone. Keys: `R` record, `H` hand tracking, `V` virtual camera, `P` pairing. The page needs no internet connection and stacks vertically on a phone, with the transport bar pinned to the bottom.
 
 | Flag | Meaning |
 |---|---|
@@ -204,7 +210,7 @@ Use the rows with the smallest `rtt_ns`: they carry the least queueing error. Fo
 The live tracker only works on the newest frame and skips frames when it falls behind. To track every frame of a recording afterwards:
 
 ```sh
-python -m glassesdata_receiver.offline ~/Movies/GlassesData/2026-11-20_212051   # on Linux the Videos folder, see Folders [--max-hands 2] [--mirrored-input]
+python -m glassesdata_receiver.offline ../local/recordings/2026-11-20_212051   # [--max-hands 2] [--mirrored-input]
 ```
 
 It writes `hands_offline.csv` (same columns as `hands.csv`) into the folder, taking `pts_us` and `phone_time_ns` from `frames.csv` by frame index, and prints a one-line summary.
@@ -233,7 +239,7 @@ Zoom, Meet, Teams and other apps can use the glasses video as a webcam. The rece
 
 ### Set up once
 
-1. `~/.venvs/glassesdata-receiver/bin/pip install pyvirtualcam` (0.15 or later). Without it everything else works, and the page says it is missing.
+1. `../local/venv/bin/pip install pyvirtualcam` (0.15 or later). Without it everything else works, and the page says it is missing.
 2. **macOS:** install [OBS Studio](https://obsproject.com) (30 or later). Open it and click **Start Virtual Camera** once. macOS asks to allow the OBS camera extension: allow it in System Settings > General > Login Items & Extensions > Camera Extensions. Then click **Stop Virtual Camera** and quit OBS. macOS only lets a signed camera extension provide a system camera; OBS ships one, so the receiver does not need its own. OBS does not need to run afterwards.
 3. **Linux (Ubuntu 24.04):** pyvirtualcam writes to a v4l2loopback device, `/dev/video10` labelled GlassesData: `scripts/setup_ubuntu.sh` sets it up, by hand see Ubuntu 24.04 > Virtual camera. The same canvas, modes and controls apply.
 4. In the other app, choose the camera **OBS Virtual Camera** (macOS) or **GlassesData** (Linux).
@@ -277,7 +283,7 @@ At start the receiver logs a self-check: the device it opened, the backend, the 
 
 **Not yet run on Ubuntu.** The Linux code paths were written and unit-tested on a Mac (`tests/test_linux.py` and `tests/test_paths.py` simulate `sys.platform`, sysfs, usbmuxd and pyvirtualcam), and the two scripts below were only checked with `bash -n` and read through. Nobody has run them, or the receiver, on Ubuntu with an iPhone attached. On the first run keep the output of `scripts/setup_ubuntu.sh` and `scripts/check_linux.sh`; expect small fixes.
 
-Everything else in this README applies unchanged: the page, recordings, calibration, Wi-Fi pairing, the virtual camera's canvas and controls. `python` below means `~/.venvs/glassesdata-receiver/bin/python`, run from this `Receiver/` folder.
+Everything else in this README applies unchanged: the page, recordings, calibration, Wi-Fi pairing, the virtual camera's canvas and controls. `python` below means `../local/venv/bin/python`, run from this `Receiver/` folder.
 
 ### Install
 
@@ -291,7 +297,7 @@ It is idempotent (run it again at any time; it only does what is missing) and pr
 
 1. checks the system (Ubuntu 24.04, x86_64, Secure Boot state; it refuses to run as root);
 2. installs with apt what is missing: `python3-venv python3-dev usbmuxd libimobiledevice-utils libgl1 libglib2.0-0t64`, and `ffmpeg` if you want it (`ffplay` to look at the virtual camera, `ffprobe` for recordings);
-3. creates `~/.venvs/glassesdata-receiver` with Ubuntu's Python 3.12 and installs `requirements-dev.txt` and `pyvirtualcam`, pinned to the versions the tests passed with on macOS (`--latest` for the newest allowed). Every one of them has a manylinux x86_64 wheel usable by CPython 3.12 (checked on PyPI: av 18.1.0 and cryptography 50.0.2 as `cp311-abi3`, opencv-contrib-python 5.1.0.95 as `cp37-abi3`, mediapipe 1.2.3 as `py3-none-manylinux_2_28`, numpy 2.4.6, zeroconf 0.154.0 and pyvirtualcam 0.15.0 as `cp312`; qrcode, ifaddr and pytest are pure Python), so nothing is compiled; then it downloads the hand model;
+3. creates `local/venv` in the repository with Ubuntu's Python 3.12 (pip's download cache goes to `local/cache/pip`) and installs `requirements-dev.txt` and `pyvirtualcam`, pinned to the versions the tests passed with on macOS (`--latest` for the newest allowed). Every one of them has a manylinux x86_64 wheel usable by CPython 3.12 (checked on PyPI: av 18.1.0 and cryptography 50.0.2 as `cp311-abi3`, opencv-contrib-python 5.1.0.95 as `cp37-abi3`, mediapipe 1.2.3 as `py3-none-manylinux_2_28`, numpy 2.4.6, zeroconf 0.154.0 and pyvirtualcam 0.15.0 as `cp312`; qrcode, ifaddr and pytest are pure Python), so nothing is compiled; then it downloads the hand model;
 4. optionally sets up the virtual camera (below);
 5. checks the iPhone's pairing if one is plugged in, and offers `idevicepair pair`;
 6. if `ufw` is on, offers to open the Wi-Fi ports;
@@ -301,8 +307,8 @@ By hand, the same without the virtual camera:
 
 ```sh
 sudo apt install python3-venv python3-dev usbmuxd libimobiledevice-utils
-python3 -m venv ~/.venvs/glassesdata-receiver
-~/.venvs/glassesdata-receiver/bin/pip install -r requirements-dev.txt pyvirtualcam
+python3 -m venv ../local/venv
+PIP_CACHE_DIR=../local/cache/pip ../local/venv/bin/pip install -r requirements-dev.txt pyvirtualcam
 ```
 
 `scripts/check_linux.sh` is the read-only diagnosis (no sudo): Python packages, folders, usbmuxd and the socket, the iPhone on the bus and its pairing, recent usbmuxd crashes, the v4l2loopback module, its signer and devices, who has the camera device open, ports 8765 and 7900, the firewall. Each problem line says what to do; it exits with 1 when something fails.
@@ -322,7 +328,7 @@ python -m glassesdata_receiver --usb --open
 
 ### Wi-Fi
 
-As on macOS: `python -m glassesdata_receiver --wifi --pair` once, then `--wifi`. The identity (`cert.pem`, `key.pem`, `pairing.json`, mode 0600 in a 0700 folder) lives in `~/.local/state/glassesdata` (`$XDG_STATE_HOME`).
+As on macOS: `python -m glassesdata_receiver --wifi --pair` once, then `--wifi`. The identity (`cert.pem`, `key.pem`, `pairing.json`, mode 0600 in a 0700 folder) lives in `local/state` in the repository.
 
 - **Bonjour.** The receiver advertises `_glassesdata._tcp` with its own responder (python-zeroconf). It binds UDP 5353 with address reuse, as Ubuntu's `avahi-daemon` does, so both run side by side; nothing needs to be stopped (expected, not yet seen on the laptop). The pairing code also carries the addresses, so the phone finds the computer without Bonjour too.
 - **Firewall.** Ubuntu's `ufw` is off by default. If it is on (`sudo ufw status`): `sudo ufw allow 7900/tcp` (the link) and `sudo ufw allow 5353/udp` (Bonjour). With `--web-host 0.0.0.0` also the web port, best limited to your LAN: `sudo ufw allow from 192.168.1.0/24 to any port 8765 proto tcp`. USB mode and the page on `127.0.0.1` need no rule.
@@ -368,6 +374,6 @@ Run `scripts/check_linux.sh` first; it covers most of this.
 | Zoom or Meet does not list GlassesData | The module needs `exclusive_caps=1`; reload it with that, then restart the app (apps list cameras when they start) |
 | `--open` does nothing | No graphical session (SSH), or run as root: open the printed `WEB_URL` yourself |
 | `import cv2` fails with `libGL.so.1` or `libgthread` | `sudo apt install libgl1 libglib2.0-0t64` (a minimal install) |
-| Recordings are not in `~/Videos` | They follow the desktop's Videos folder (its name in the session's language); `--out DIR` sets another one |
-| A long recording stops when the laptop goes to sleep | Ubuntu suspends an idle laptop on battery after 15 minutes. Plug it in, or start the receiver under `systemd-inhibit --what=sleep:idle --why="GlassesData" ~/.venvs/glassesdata-receiver/bin/python -m glassesdata_receiver ...` |
+| Where are the recordings? | In the repository's `local/recordings`; `--out DIR` sets another folder for one run |
+| A long recording stops when the laptop goes to sleep | Ubuntu suspends an idle laptop on battery after 15 minutes. Plug it in, or start the receiver under `systemd-inhibit --what=sleep:idle --why="GlassesData" ../local/venv/bin/python -m glassesdata_receiver ...` |
 | Closing the terminal | The receiver stops cleanly on SIGHUP (the recording is closed), as on Ctrl-C. To keep it running, start it under `nohup` or in `tmux` |

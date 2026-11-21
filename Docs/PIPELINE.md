@@ -17,9 +17,22 @@ Package: `Pipeline/glassesdata_pipeline/` (Python 3.11+). Command line: `python 
   then reports the step as `skipped` and the steps that need its outputs as `blocked`; `run` still
   exits 0, unless the step was named with `--steps` (then it counts as failed and `run` exits 1).
 - Tests that need a heavy package start with `pytest.importorskip("name")`.
-- Mac test command: `cd Pipeline && ~/.venvs/glassesdata-receiver/bin/python -m pytest tests -q -p no:cacheprovider`.
+- Mac test command: `cd Pipeline && ../local/venv/bin/python -m pytest tests -q -p no:cacheprovider`.
 - Nothing may be installed on the Mac. `Pipeline/requirements.txt` (full) and
   `Pipeline/requirements-core.txt` describe the Linux install.
+- **Nothing is stored outside the project folder**, on either machine. Every default location is
+  inside the repository's gitignored `local/` folder, computed from the code's own location (never
+  from `$HOME`): `local/venv` (Mac), `local/venv-pipeline` (Linux, `GLASSESDATA_PIPELINE_VENV`),
+  `local/src/` (third-party clones: `mujoco_menagerie`, `WiLoR`, `hamer`, `Video-Depth-Anything`;
+  `GLASSESDATA_SRC`, the Menagerie also `MUJOCO_MENAGERIE`), `local/cache/` (`hand_landmarker.task`
+  shared with the receiver, and the library caches), `local/tmp/` (temporary files, pytest's
+  `local/tmp/pytest-pipeline`), `local/recordings/` (recordings), `local/smoke/`
+  (`omen_smoke.sh` logs). Importing the package (`glassesdata_pipeline/paths.py`,
+  `use_local_dirs`) sets, before any heavy import and only where not set already: `XDG_CACHE_HOME`
+  = `local/cache`, `HF_HOME`, `TORCH_HOME`, `MPLCONFIGDIR`, `WARP_CACHE_PATH`, `CUDA_CACHE_PATH`,
+  `TORCHINDUCTOR_CACHE_DIR`, `TRITON_CACHE_DIR`, `YOLO_CONFIG_DIR`, `FVCORE_CACHE`, `PIP_CACHE_DIR`
+  (folders in `local/cache/`) and `TMPDIR` = `local/tmp`; `Pipeline/scripts/local_dirs.sh` exports
+  the same for the shell scripts. Step outputs go into the recording's `derived/`.
 
 ## 1. Conventions
 
@@ -63,7 +76,8 @@ Written by the receiver (`Receiver/glassesdata_receiver/recorder.py`):
 | `gt/` | ground truth, synthetic recordings only (§8) |
 
 IMU units: the Meta SDK documents the accelerometer in m/s², the gyroscope in rad/s and the
-magnetometer in µT (the magnetometer is not used). Not checked on the glasses yet, so the `imu`
+magnetometer in µT. The magnetometer is not used: the glasses appear to report none (empty `mx my mz`
+cells), and yaw comes from the visual trajectory. Not checked on the glasses yet, so the `imu`
 step checks the data instead of trusting that: by default (`imu.accel_units = "auto"`) it detects
 accelerometer units from the median norm at rest (≈9.8 → m/s², ≈1 → g; synthetic recordings write
 g), and `imu.gyro_units = "auto"` compares the gyroscope with the visual rotation rate (≈1 → rad/s,
@@ -217,6 +231,12 @@ sub-tables, and so on for `ingest`, `hands2d`, `depth`, `hand3d`, `imu`, `world`
 `configs/*.toml`, `<recording>/pipeline.toml`, `--config FILE`, `--set section.key=value` (value
 parsed as TOML, falling back to a plain string).
 
+File paths in the configuration (`retarget.menagerie_path`, `train.scene.menagerie_path`,
+`hands2d.model_path`, `hands2d.repo_dir`, `depth.vda_repo_dir`, `depth.vda_checkpoint`) are
+relative to the repository root (`~` is expanded); an empty value means the default in `local/`
+(§0). `slam.import_path` and `train.scene.xml` are relative to the recording folder. Paths given on
+the command line (recording folders, `synth OUT`) are relative to the working directory.
+
 Backends are chosen per step, for example `hands2d.backend = "mediapipe" | "wilor" | "hamer" | "gt"`,
 `depth.backend = "depth_anything_v2" | "video_depth_anything" | "gt"`,
 `slam.backend = "builtin" | "import"` (with `slam.import_path` to a TUM-format trajectory from
@@ -234,8 +254,10 @@ Pipeline/
   requirements.txt, requirements-core.txt
   scripts/setup_ubuntu.sh  one-time install on the Ubuntu 24.04 + NVIDIA laptop
   scripts/omen_smoke.sh    first run there: tests, synthetic end to end, heavy steps, RL
+  scripts/local_dirs.sh    cache and temp variables (into local/) for both scripts
   glassesdata_pipeline/
     __main__.py   CLI: run, synth, eval, eval-charuco, view, train, list-steps
+    paths.py      default folders in local/, cache variables, config path resolution (§0, §6)
     config.py     load/merge TOML, dotted access
     episode.py    Episode (below)
     runner.py     step registry, dependency order, caching, logging

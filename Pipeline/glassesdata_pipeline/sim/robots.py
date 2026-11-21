@@ -1,8 +1,9 @@
 """Robot hand tables and the human -> robot keypoint mapping (numpy only).
 
-Shadow Hand (MuJoCo Menagerie ``shadow_hand/right_hand.xml`` and ``left_hand.xml``; get them on
-the Linux machine with ``git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie``
-and set ``retarget.menagerie_path``). Facts read from those files (Menagerie ``main``, Nov 2026):
+Shadow Hand (MuJoCo Menagerie ``shadow_hand/right_hand.xml`` and ``left_hand.xml``; on the Linux
+machine ``scripts/setup_ubuntu.sh`` clones https://github.com/google-deepmind/mujoco_menagerie into
+the repository's ``local/src/mujoco_menagerie``, see ``retarget.menagerie_path``). Facts read from
+those files (Menagerie ``main``, Nov 2026):
 
 * Names: right hand prefix ``rh_``, left ``lh_``. Bodies ``{p}forearm`` (root, ``quat="0 1 0 1"``)
   -> ``{p}wrist`` (joint ``{p}WRJ2``) -> ``{p}palm`` (joint ``{p}WRJ1``, ``pos="0 0 0.034"``) -> per

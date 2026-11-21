@@ -38,3 +38,7 @@ __pycache__/
 
 # Personal signing values (see Config/Signing.xcconfig)
 Config/Signing.local.xcconfig
+
+# Everything this machine keeps for the project: Python environments, recordings,
+# calibration and pairing state, model caches, build output, temporary files
+local/

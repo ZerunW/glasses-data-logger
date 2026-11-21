@@ -11,6 +11,14 @@ Library entry points: :class:`glassesdata_pipeline.episode.Episode`,
 :mod:`glassesdata_pipeline.skeleton`, :mod:`glassesdata_pipeline.runner`.
 
 Heavy packages (torch, mujoco, open3d, rerun, ...) are never imported at module import time.
+
+Importing the package points the caches and temporary files of every library into the
+repository's gitignored ``local/`` folder (:func:`glassesdata_pipeline.paths.use_local_dirs`;
+variables that are already set win), so nothing is written outside the project folder.
 """
 
+from .paths import use_local_dirs as _use_local_dirs
+
 __version__ = "0.1.0"
+
+_use_local_dirs()

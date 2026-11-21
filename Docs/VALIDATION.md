@@ -1,7 +1,7 @@
 # Validation record
 
 Last updated 2026-11-21. Everything below ran on the development Mac (macOS, Python 3.11 in
-`~/.venvs/glassesdata-receiver`, Xcode 27.2). **Nothing has run with the real glasses, the real
+`local/venv` in the repository, Xcode 27.2). **Nothing has run with the real glasses, the real
 iPhone, Ubuntu or a CUDA GPU yet.** The synthetic numbers come from idealised data (no motion
 blur, a global shutter, an exact calibration, ground-truth detectors with added noise); real video
 will be worse.
@@ -10,8 +10,8 @@ will be worse.
 
 | Suite | Command | Result on 2026-11-21 |
 |---|---|---|
-| Receiver | `cd Receiver && ~/.venvs/glassesdata-receiver/bin/python -m pytest tests -q -p no:cacheprovider` | **339 passed** (about 1.5 min) |
-| Pipeline | `cd Pipeline && ~/.venvs/glassesdata-receiver/bin/python -m pytest tests -q -p no:cacheprovider` | **308 passed, 10 skipped** (about 40 s) |
+| Receiver | `cd Receiver && ../local/venv/bin/python -m pytest tests -q -p no:cacheprovider` | **339 passed** (about 1.5 min) |
+| Pipeline | `cd Pipeline && ../local/venv/bin/python -m pytest tests -q -p no:cacheprovider` | **308 passed, 10 skipped** (about 40 s) |
 | iOS (unit + UI, simulator) | see below | 78 unit test methods in `CameraAccessTests`, 20 UI test methods in `CameraAccessUITests` (including `ScreenshotTourTests`). Signed simulator run on iPhone 18 Pro: **78 unit + 20 UI passed** (three consecutive full runs on 2026-11-21, the last ~10 min) |
 
 iOS tests on a simulator, signed with the team from `Config/Signing.local.xcconfig` (an unsigned
@@ -21,7 +21,8 @@ command the iOS work was accepted with:
 ```sh
 xcodebuild test -project GlassesData.xcodeproj -scheme GlassesData \
   -destination 'platform=iOS Simulator,name=iPhone 18 Pro' \
-  -derivedDataPath /tmp/GlassesDataSimDerived \
+  -derivedDataPath "$PWD/local/build/sim" -clonedSourcePackagesDirPath "$PWD/local/build/SourcePackages" \
+  -packageCachePath "$PWD/local/cache/spm" \
   -test-timeouts-enabled YES -parallel-testing-enabled NO
 ```
 
@@ -91,10 +92,10 @@ slow drift) and 3 % per-pixel noise, ground-truth object masks. Every other step
 
 ```sh
 cd Pipeline
-PY=~/.venvs/glassesdata-receiver/bin/python
-$PY -m glassesdata_pipeline synth /tmp/synth_s3 --seconds 8 --seed 3
-$PY -m glassesdata_pipeline run /tmp/synth_s3      # retarget skipped, physics blocked on the Mac; exit 0
-$PY -m glassesdata_pipeline eval /tmp/synth_s3     # derived/eval.md
+PY=../local/venv/bin/python
+$PY -m glassesdata_pipeline synth ../local/tmp/synth_s3 --seconds 8 --seed 3
+$PY -m glassesdata_pipeline run ../local/tmp/synth_s3      # retarget skipped, physics blocked on the Mac; exit 0
+$PY -m glassesdata_pipeline eval ../local/tmp/synth_s3     # derived/eval.md
 ```
 
 | Metric | seed 3 | seed 7 | seed 11 |

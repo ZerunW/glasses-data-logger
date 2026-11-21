@@ -12,31 +12,41 @@
 #   -y, --yes        answer yes to every question
 #   --cuda VARIANT   PyTorch wheel index: auto (default: from the driver), cu130 or cu128
 #   --models         download the model weights now (Depth Anything V2 metric indoor small/base/large,
-#                    SAM 2.1 hiera-large, MediaPipe hand landmarker; about 2.8 GB into ~/.cache)
+#                    SAM 2.1 hiera-large, MediaPipe hand landmarker; about 2.8 GB into local/cache)
 #   --no-models      do not offer the download (the backends fetch what they need on first use)
 #   --no-sam2        skip SAM 2 (objects.mask_backend = "sam2"; a git install)
 #   --with-wilor     also clone and install WiLoR (hands2d.backend = "wilor"; needs MANO, see below)
 #   --with-hamer     also clone and install HaMeR (hands2d.backend = "hamer"; needs MANO, see below)
 #   -h, --help       show this help
 #
-# Environment: GLASSESDATA_PIPELINE_VENV (default ~/.venvs/glassesdata-pipeline),
+# Environment: GLASSESDATA_PIPELINE_VENV (default local/venv-pipeline in the repository),
 #              GLASSESDATA_PYTHON (default python3.12, Ubuntu 24.04's Python),
-#              GLASSESDATA_SRC (default ~/src: the MuJoCo Menagerie, WiLoR and HaMeR clones),
+#              GLASSESDATA_SRC (default local/src: the MuJoCo Menagerie, WiLoR and HaMeR clones),
 #              GLASSESDATA_SAM2_REF, GLASSESDATA_MENAGERIE_REF, GLASSESDATA_WILOR_REF, GLASSESDATA_HAMER_REF
 #              (the git commit installed; default: the commits pinned below, checked in November 2026;
 #              a branch or tag name works too, e.g. GLASSESDATA_MENAGERIE_REF=main).
 #
-# Nothing is written into this repository. Written on a Mac and checked with bash -n only: the
-# first run on the Linux laptop is its test (then run scripts/omen_smoke.sh).
+# The project keeps nothing outside its own folder: the venv, the clones, pip's cache, the model
+# weights and temporary files all go into the repository's gitignored local/ folder (cache and
+# temp variables: scripts/local_dirs.sh). Nothing tracked by git is changed. Written on a Mac and
+# checked with bash -n only: the first run on the Linux laptop is its test (then run
+# scripts/omen_smoke.sh).
 
 set -euo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PIPELINE_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd)
-readonly SCRIPT_DIR PIPELINE_DIR
-VENV=${GLASSESDATA_PIPELINE_VENV:-$HOME/.venvs/glassesdata-pipeline}
+REPO_DIR=$(cd -- "$PIPELINE_DIR/.." && pwd)
+readonly SCRIPT_DIR PIPELINE_DIR REPO_DIR
+if [[ $EUID -eq 0 ]]; then  # before anything is created in local/
+    printf 'Run this as your own user, not with sudo: it asks for sudo itself where needed (local/ belongs to you).\n' >&2
+    exit 1
+fi
+# shellcheck source=local_dirs.sh
+source "$SCRIPT_DIR/local_dirs.sh"  # caches and TMPDIR into local/ (exported for every command below)
+VENV=${GLASSESDATA_PIPELINE_VENV:-$LOCAL_DIR/venv-pipeline}
 PYTHON=${GLASSESDATA_PYTHON:-python3.12}
-SRC=${GLASSESDATA_SRC:-$HOME/src}
+SRC=${GLASSESDATA_SRC:-$LOCAL_DIR/src}
 VENV_PY="$VENV/bin/python"
 MENAGERIE="$SRC/mujoco_menagerie"
 readonly VENV PYTHON SRC VENV_PY MENAGERIE
@@ -180,9 +190,6 @@ EOF
 DRIVER_MAJOR=0
 check_system() {
     step "This computer"
-    if [[ $EUID -eq 0 ]]; then
-        die "run this as your own user, not with sudo: it asks for sudo itself where needed (the venv and the clones belong to you)."
-    fi
     local name="unknown" id="" version=""
     if [[ -r /etc/os-release ]]; then
         # shellcheck source=/dev/null
@@ -202,12 +209,14 @@ check_system() {
     info "pipeline: $PIPELINE_DIR"
     info "venv:     $VENV"
     info "clones:   $SRC"
+    info "caches:   $XDG_CACHE_HOME (Hugging Face $HF_HOME, pip $PIP_CACHE_DIR)"
+    info "temp:     $TMPDIR"
     local free_gb
-    free_gb=$(df -Pk "$HOME" | awk 'NR == 2 {printf "%d", $4 / 1048576}')
+    free_gb=$(df -Pk "$REPO_DIR" | awk 'NR == 2 {printf "%d", $4 / 1048576}')
     if [[ $free_gb -lt 25 ]]; then
-        warn "only ${free_gb} GB free in $HOME: the venv (torch with CUDA, ~8 GB) and the models (~3 GB) need about 15 GB"
+        warn "only ${free_gb} GB free in $REPO_DIR: the venv (torch with CUDA, ~8 GB) and the models (~3 GB) need about 15 GB"
     else
-        ok "${free_gb} GB free in $HOME"
+        ok "${free_gb} GB free in $REPO_DIR"
     fi
 }
 
@@ -429,13 +438,13 @@ clone_menagerie() {
 # ------------------------------------------------------------------ 5. model weights
 
 download_models() {
-    step "Model weights (Hugging Face cache: ${HF_HOME:-$HOME/.cache/huggingface})"
+    step "Model weights (Hugging Face cache: $HF_HOME)"
     if [[ $MODELS == no ]]; then
         info "skipped (--no-models): each backend downloads what it uses on first use"
         return
     fi
     info "Depth Anything V2 metric indoor small/base/large (~0.1/0.4/1.3 GB), SAM 2.1 hiera-large (~0.9 GB),"
-    info "MediaPipe hand_landmarker.task (8 MB, into ~/.cache/glassesdata/)"
+    info "MediaPipe hand_landmarker.task (8 MB, into $LOCAL_DIR/cache/)"
     if [[ $MODELS == ask ]] && ! ask "Download them now (about 2.8 GB)?"; then
         info "skipped: each backend downloads what it uses on first use"
         return
@@ -599,8 +608,10 @@ if [[ $WARNINGS -gt 0 ]]; then
     info "$WARNINGS warning(s) above."
 fi
 info "MuJoCo renders off-screen with EGL on the NVIDIA GPU; set this in every shell that runs the pipeline"
-info "(or add it to ~/.bashrc):"
+info "(omen_smoke.sh sets it itself):"
 info "  export MUJOCO_GL=egl"
-info "  export MUJOCO_MENAGERIE=$MENAGERIE     # retarget.menagerie_path defaults to ~/src/mujoco_menagerie"
+if [[ $MENAGERIE != "$LOCAL_DIR/src/mujoco_menagerie" ]]; then
+    info "  export MUJOCO_MENAGERIE=$MENAGERIE     # retarget.menagerie_path defaults to local/src/mujoco_menagerie"
+fi
 info "First run (tests, synthetic end-to-end, real models, RL; log folder + summary):"
 info "  \"$SCRIPT_DIR/omen_smoke.sh\" [a real recording folder]"

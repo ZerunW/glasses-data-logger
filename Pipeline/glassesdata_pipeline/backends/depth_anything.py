@@ -5,7 +5,8 @@ the development Mac (no torch there).
 
 Install: ``pip install torch transformers>=4.45`` (4.45 added the metric Depth Anything head:
 ``config.depth_estimation_type = "metric"``, ``max_depth``). Weights are downloaded by
-``from_pretrained`` into the Hugging Face cache (``~/.cache/huggingface``), never into the repo.
+``from_pretrained`` into the Hugging Face cache, ``local/cache/huggingface`` in the repository
+(``HF_HOME``, set when the package is imported: :mod:`glassesdata_pipeline.paths`).
 
 Checkpoints (``depth.model``): ``depth-anything/Depth-Anything-V2-Metric-Indoor-{Small,Base,Large}-hf``
 (Hypersim, ``max_depth`` 20 m) or ``...-Metric-Outdoor-...-hf`` (Virtual KITTI 2, 80 m). Short names

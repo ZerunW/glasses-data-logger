@@ -12,39 +12,27 @@ from glassesdata_receiver import link, paths, session
 def home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     for variable in ("XDG_STATE_HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME"):
-        monkeypatch.delenv(variable, raising=False)
+        monkeypatch.setenv(variable, str(tmp_path / variable.lower()))
     return tmp_path
 
 
-def test_macos_keeps_the_existing_folders(home, monkeypatch):
-    monkeypatch.setattr("sys.platform", "darwin")
-    monkeypatch.setenv("XDG_STATE_HOME", "/elsewhere")  # ignored on macOS
-    assert paths.state_dir() == home / "Library" / "Application Support" / "GlassesData"
-    assert paths.cache_dir() == home / "Library" / "Caches" / "GlassesData"
-    assert paths.recordings_dir() == home / "Movies" / "GlassesData"
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_every_folder_is_inside_the_repository(home, monkeypatch, platform):
+    """Nothing outside the project folder: HOME and the XDG variables play no part."""
+    monkeypatch.setattr("sys.platform", platform)
+    repo = Path(__file__).resolve().parents[2]
+    assert paths.REPO_DIR == repo and (repo / "Receiver" / "glassesdata_receiver").is_dir()
+    assert paths.local_dir() == repo / "local"
+    assert paths.state_dir() == repo / "local" / "state"
+    assert paths.cache_dir() == repo / "local" / "cache"
+    assert paths.recordings_dir() == repo / "local" / "recordings"
+    for folder in (paths.state_dir(), paths.cache_dir(), paths.recordings_dir()):
+        assert home not in folder.parents
 
 
-def test_linux_defaults_follow_xdg(home, monkeypatch):
-    monkeypatch.setattr("sys.platform", "linux")
-    assert paths.state_dir() == home / ".local" / "state" / "glassesdata"
-    assert paths.cache_dir() == home / ".cache" / "glassesdata"
-    assert paths.recordings_dir() == home / "Videos" / "GlassesData"
-
-
-def test_linux_honours_xdg_variables(home, monkeypatch, tmp_path):
-    monkeypatch.setattr("sys.platform", "linux")
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
-    assert paths.state_dir() == tmp_path / "state" / "glassesdata"
-    assert paths.cache_dir() == tmp_path / "cache" / "glassesdata"
-
-
-def test_relative_xdg_values_are_ignored(home, monkeypatch):
-    monkeypatch.setattr("sys.platform", "linux")
-    monkeypatch.setenv("XDG_STATE_HOME", "relative/state")
-    monkeypatch.setenv("XDG_CACHE_HOME", "")
-    assert paths.state_dir() == home / ".local" / "state" / "glassesdata"
-    assert paths.cache_dir() == home / ".cache" / "glassesdata"
+def test_local_is_ignored_by_git():
+    lines = (paths.REPO_DIR / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "local/" in lines
 
 
 def test_computer_name_on_macos(monkeypatch):

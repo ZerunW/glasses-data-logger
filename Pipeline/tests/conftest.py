@@ -9,6 +9,16 @@ import pytest
 
 SYNTH_SECONDS = 2.0
 SYNTH_SIZE = (180, 320)
+BASETEMP = Path(__file__).resolve().parents[2] / "local" / "tmp" / "pytest-pipeline"
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config):
+    """Temporary test folders go in the repository's local/tmp, never the system temp folder
+    (``--basetemp`` on the command line still wins; pytest empties that folder at every run)."""
+    if not config.option.basetemp:
+        BASETEMP.parent.mkdir(parents=True, exist_ok=True)
+        config.option.basetemp = str(BASETEMP)
 
 
 @pytest.fixture(scope="session")

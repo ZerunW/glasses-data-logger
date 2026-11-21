@@ -7,7 +7,7 @@
 #   Receiver/scripts/check_linux.sh
 #
 # Exit status: 0 when no check failed (warnings allowed), 1 otherwise.
-# Environment: GLASSESDATA_VENV (default ~/.venvs/glassesdata-receiver).
+# Environment: GLASSESDATA_VENV (default local/venv in the repository).
 #
 # Written on a Mac and checked with bash -n; not yet run on Ubuntu.
 
@@ -16,9 +16,10 @@ set -uo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 RECEIVER_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd)
-VENV=${GLASSESDATA_VENV:-$HOME/.venvs/glassesdata-receiver}
+REPO_DIR=$(cd -- "$RECEIVER_DIR/.." && pwd)
+VENV=${GLASSESDATA_VENV:-$REPO_DIR/local/venv}
 VENV_PY="$VENV/bin/python"
-readonly SCRIPT_DIR RECEIVER_DIR VENV VENV_PY
+readonly SCRIPT_DIR RECEIVER_DIR REPO_DIR VENV VENV_PY
 readonly LINK_PORT=7900 WEB_PORT=8765
 readonly MODPROBE_CONF=/etc/modprobe.d/glassesdata-v4l2loopback.conf
 readonly MODULES_LOAD_CONF=/etc/modules-load.d/glassesdata-v4l2loopback.conf

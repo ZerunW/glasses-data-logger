@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds a macOS stand-in for the iPhone app from the app's real link sources and runs it.
-# The binary goes to a temporary directory, never into the repository.
+# The binary goes to a temporary directory in the repository's gitignored local/tmp.
 #
 #   Receiver/tools/swift_sender/run.sh --usb [--port P] [--seconds N] [VIDEO]
 #   Receiver/tools/swift_sender/run.sh --wifi 'gdpair://v1?...' [--host H] [--seconds N] [VIDEO]
@@ -15,7 +15,8 @@ app="$repo/CameraAccess"
 
 build_dir="${SWIFT_SENDER_BUILD_DIR:-}"
 if [[ -z "$build_dir" ]]; then
-  build_dir="$(mktemp -d "${TMPDIR:-/tmp}/swift_sender.XXXXXX")"
+  mkdir -p "$repo/local/tmp"
+  build_dir="$(mktemp -d "$repo/local/tmp/swift_sender.XXXXXX")"
   trap 'rm -rf "$build_dir"' EXIT
 fi
 mkdir -p "$build_dir"

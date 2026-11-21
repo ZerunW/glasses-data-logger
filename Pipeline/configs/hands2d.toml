@@ -5,8 +5,8 @@
 backend = "mediapipe"
 
 # --- mediapipe ---------------------------------------------------------------------------------
-# hand_landmarker.task; "" = the receiver's cache (macOS ~/Library/Caches/GlassesData/,
-# Linux ~/.cache/glassesdata/).
+# hand_landmarker.task; "" = local/cache/ in the repository (the receiver's copy). Paths in these
+# files are relative to the repository root (~ is expanded).
 model_path = ""
 # Download the model from Google's official URL when it is missing (never when the environment
 # variable GLASSESDATA_NO_DOWNLOAD is set, as the tests do).
@@ -29,8 +29,9 @@ trust_label_score = 0.9
 continuity_frames = 12
 
 # --- wilor / hamer (Linux + CUDA) ------------------------------------------------------------------
-# Folder of the cloned repository (contains pretrained_models/ or _DATA/ and mano_data/); "" = the
-# current working directory. See the module docstrings for the install steps.
+# Folder of the cloned repository (contains pretrained_models/ or _DATA/ and mano_data/); "" =
+# local/src/WiLoR or local/src/hamer ($GLASSESDATA_SRC replaces local/src), where
+# scripts/setup_ubuntu.sh --with-wilor / --with-hamer clones them. See the module docstrings.
 repo_dir = ""
 # Hand detector confidence (WiLoR's YOLO detector; HaMeR's ViTPose hand keypoints).
 detector_confidence = 0.3

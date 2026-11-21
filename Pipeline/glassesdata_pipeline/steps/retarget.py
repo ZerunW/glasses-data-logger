@@ -1,8 +1,8 @@
 """Step ``retarget``: ``hands_world.npz`` -> ``derived/retarget_<robot>.npz`` (floating robot hands).
 
-Needs ``mujoco`` + ``mink`` and a MuJoCo Menagerie clone (``retarget.menagerie_path``; the
-environment variable ``MUJOCO_MENAGERIE`` is used when that path does not exist). The robot model
-used is written to ``derived/sim/robot_<robot>.xml`` (:func:`sim.mjcf.compose` with
+Needs ``mujoco`` + ``mink`` and a MuJoCo Menagerie clone (:func:`menagerie_path`: by default
+``local/src/mujoco_menagerie`` in the repository, where ``scripts/setup_ubuntu.sh`` clones it).
+The robot model used is written to ``derived/sim/robot_<robot>.xml`` (:func:`sim.mjcf.compose` with
 ``base="free"``: every robot name prefixed with ``<side>/``, a free joint ``<side>/base_free`` on
 the palm, fingertip sites added).
 
@@ -20,11 +20,11 @@ Output arrays (PIPELINE.md section 5 plus extras):
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 import numpy as np
 
+from .. import paths
 from ..episode import Episode
 from ..errors import PipelineError, require
 from ..sim import mjcf, robots
@@ -42,13 +42,14 @@ log = logging.getLogger(__name__)
 
 
 def menagerie_path(rcfg) -> Path:
-    """``retarget.menagerie_path``, or ``$MUJOCO_MENAGERIE`` when the configured path does not exist."""
-    path = Path(str(rcfg.get("menagerie_path", "~/src/mujoco_menagerie"))).expanduser()
-    if not path.is_dir() and os.environ.get("MUJOCO_MENAGERIE"):
-        path = Path(os.environ["MUJOCO_MENAGERIE"]).expanduser()
+    """``retarget.menagerie_path`` (relative to the repository root), or ``$MUJOCO_MENAGERIE`` when
+    that is empty or does not exist, else ``$GLASSESDATA_SRC`` or ``local/src`` + ``/mujoco_menagerie``
+    (:func:`paths.menagerie_dir`)."""
+    path = paths.menagerie_dir(rcfg.get("menagerie_path", ""))
     if not path.is_dir():
         raise PipelineError(f"MuJoCo Menagerie not found at {path}: git clone --depth 1 "
-                            "https://github.com/google-deepmind/mujoco_menagerie and set retarget.menagerie_path")
+                            "https://github.com/google-deepmind/mujoco_menagerie there (scripts/setup_ubuntu.sh does), "
+                            "or set retarget.menagerie_path or $MUJOCO_MENAGERIE")
     return path
 
 

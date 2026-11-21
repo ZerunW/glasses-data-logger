@@ -120,9 +120,9 @@ instead of dropping it; otherwise it keeps latency low (2 MiB) and drops to the 
 
 ```sh
 cd Receiver
-python3.11 -m venv ~/.venvs/glassesdata-receiver        # outside OneDrive / iCloud Drive
-~/.venvs/glassesdata-receiver/bin/pip install -r requirements-dev.txt
-~/.venvs/glassesdata-receiver/bin/python -m glassesdata_receiver --usb --open
+python3.11 -m venv ../local/venv                        # everything local stays in the repository's local/
+../local/venv/bin/pip install -r requirements-dev.txt
+../local/venv/bin/python -m glassesdata_receiver --usb --open
 ```
 
 Plug in the iPhone, trust the computer, set the app's Computer link to USB. The page shows the
@@ -143,7 +143,7 @@ Not run on Ubuntu yet; keep the scripts' output from the first run.
 # the repository on the laptop, outside any synced folder (git clone or copy)
 Receiver/scripts/setup_ubuntu.sh      # apt packages, venv (Python 3.12), v4l2loopback, ufw; asks before each sudo step
 Receiver/scripts/check_linux.sh       # read-only diagnosis
-cd Receiver && ~/.venvs/glassesdata-receiver/bin/python -m glassesdata_receiver --usb --open
+cd Receiver && ../local/venv/bin/python -m glassesdata_receiver --usb --open
 ```
 
 Unlock the iPhone and tap Trust once (or `idevicepair pair`). The virtual camera is `/dev/video10`
@@ -170,8 +170,7 @@ field of view and no distortion.
 ### 5. Record
 
 Press Record on the page (`R`), the Record button in the app, or start the receiver with
-`--record`. A recording is a folder `~/Movies/GlassesData/YYYY-MM-DD_HHMMSS/` (macOS) or
-`~/Videos/GlassesData/...` (Ubuntu) with `video.mp4` (the original HEVC), `frames.csv`,
+`--record`. A recording is a folder `local/recordings/YYYY-MM-DD_HHMMSS/` in the repository with `video.mp4` (the original HEVC), `frames.csv`,
 `motion.csv`, `inputs.csv`, `device_state.csv`, `clock.csv`, `hands.csv`, `calibration.json`,
 `profile.json` and `info.json` (format: [Receiver/README.md](Receiver/README.md#recordings)).
 If closing a recording fails (a full disk, say), `info.json` gets `closeError` and the page lists
@@ -184,22 +183,22 @@ Not run on the laptop yet: both scripts were written on the Mac and checked with
 keep their output from the first run.
 
 ```sh
-# the repository on the laptop, outside any synced folder
-Pipeline/scripts/setup_ubuntu.sh            # Ubuntu packages, NVIDIA driver check, venv ~/.venvs/glassesdata-pipeline,
+# the repository on the laptop; everything the scripts store goes in its local/ folder
+Pipeline/scripts/setup_ubuntu.sh            # Ubuntu packages, NVIDIA driver check, venv local/venv-pipeline,
                                             # torch (cu130 for driver >= 580, cu128 for 570-579; --cuda overrides),
-                                            # requirements, SAM 2, ~/src/mujoco_menagerie; --models downloads the
+                                            # requirements, SAM 2, local/src/mujoco_menagerie; --models downloads the
                                             # weights; idempotent; asks before every sudo step
 export MUJOCO_GL=egl                        # MuJoCo renders off-screen on the GPU (add to ~/.bashrc)
 Pipeline/scripts/omen_smoke.sh [REC]        # first run: tests, synthetic end to end (gt, then Depth Anything V2
                                             # and SAM 2), retarget/physics/Rerun, RL on MuJoCo CPU and Warp GPU,
-                                            # REC if given; logs + summary.txt in ~/glassesdata-smoke/<date>_<time>/
+                                            # REC if given; logs + summary.txt in local/smoke/<date>_<time>/
 ```
 
 Then, for a recording `REC` (copied from the receiver's folder):
 
 ```sh
 cd Pipeline
-PY=~/.venvs/glassesdata-pipeline/bin/python
+PY=../local/venv-pipeline/bin/python
 $PY -m glassesdata_pipeline list-steps REC          # steps and cache state
 $PY -m glassesdata_pipeline run REC                 # ingest … viz into REC/derived/ (cached; --force to redo)
 $PY -m glassesdata_pipeline eval-charuco REC_BOARD  # depth and hand-derived scale against the on-screen board
@@ -209,7 +208,7 @@ $PY -m glassesdata_pipeline train REC               # MuJoCo Warp, 4096 worlds, 
 ```
 
 `--set section.key=value` overrides any parameter in `Pipeline/configs/`. The Menagerie is
-expected at `~/src/mujoco_menagerie` (`retarget.menagerie_path`; `MUJOCO_MENAGERIE` is used when
+expected at `local/src/mujoco_menagerie` in the repository (`retarget.menagerie_path`; `MUJOCO_MENAGERIE` is used when
 that path does not exist). WiLoR and
 HaMeR are optional hand backends (`setup_ubuntu.sh --with-wilor` / `--with-hamer`; both need
 `MANO_RIGHT.pkl`, which you download yourself after registering). More in
@@ -222,9 +221,9 @@ development Mac use the receiver's environment, which has them).
 
 ```sh
 cd Pipeline
-PY=~/.venvs/glassesdata-receiver/bin/python
-$PY -m glassesdata_pipeline synth /tmp/synth_demo --seconds 8   # recording + gt/, hands drawn
-$PY -m glassesdata_pipeline run /tmp/synth_demo                 # every step; exit 0
+PY=../local/venv/bin/python
+$PY -m glassesdata_pipeline synth ../local/tmp/synth_demo --seconds 8   # recording + gt/, hands drawn
+$PY -m glassesdata_pipeline run ../local/tmp/synth_demo                 # every step; exit 0
 $PY -m glassesdata_pipeline eval /tmp/synth_demo                # derived/eval.md
 ```
 

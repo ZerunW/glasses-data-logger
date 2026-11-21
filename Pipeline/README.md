@@ -10,15 +10,16 @@ first, then the code.
 
 ```sh
 cd Pipeline
-PY=~/.venvs/glassesdata-receiver/bin/python          # core packages only; nothing heavy is installed here
+PY=../local/venv/bin/python          # the repository's Mac venv: core packages only; nothing heavy is installed here
+DEMO=../local/tmp/synth_demo
 
-$PY -m glassesdata_pipeline synth /tmp/synth_demo --seconds 8      # synthetic recording + gt/ (hands drawn)
-$PY -m glassesdata_pipeline run /tmp/synth_demo                    # every step; exit 0
-$PY -m glassesdata_pipeline eval /tmp/synth_demo                   # derived/eval.json, eval.md, eval/*.png
-$PY -m glassesdata_pipeline list-steps /tmp/synth_demo             # the steps and their cache state
-$PY -m glassesdata_pipeline run /tmp/synth_demo --steps objects --force
-$PY -m glassesdata_pipeline run REC --from slam --until world --set slam.backend=import
-$PY -m pytest tests -q -p no:cacheprovider                         # tests (~40 s)
+$PY -m glassesdata_pipeline synth $DEMO --seconds 8      # synthetic recording + gt/ (hands drawn)
+$PY -m glassesdata_pipeline run $DEMO                    # every step; exit 0
+$PY -m glassesdata_pipeline eval $DEMO                   # derived/eval.json, eval.md, eval/*.png
+$PY -m glassesdata_pipeline list-steps $DEMO             # the steps and their cache state
+$PY -m glassesdata_pipeline run $DEMO --steps objects --force
+$PY -m glassesdata_pipeline run ../local/recordings/REC --from slam --until world --set slam.backend=import
+$PY -m pytest tests -q -p no:cacheprovider               # tests (~40 s; temporary folders in local/tmp/pytest-pipeline)
 ```
 
 On the Mac `retarget` needs MuJoCo + mink: the run reports it as `skipped (needs mujoco: pip
@@ -28,18 +29,38 @@ does a step you name with `--steps` that cannot run. Step statuses: `ran`, `cach
 date for the same code version, parameters and inputs), `skipped` (an optional package is
 missing), `blocked` (a required step did not produce its outputs), `failed`.
 
-Keep recordings and generated data out of this repository (it lives in OneDrive).
+Nothing is kept outside the project folder. Everything a machine keeps for the project lives in
+the repository's gitignored `local/` folder (same layout as the receiver,
+`glassesdata_pipeline/paths.py`):
+
+| Path | What |
+|---|---|
+| `local/venv`, `local/venv-pipeline` | the Mac's Python environment; the Linux machine's (`GLASSESDATA_PIPELINE_VENV`) |
+| `local/recordings/` | recordings (the receiver's default) |
+| `local/src/` | third-party clones: `mujoco_menagerie`, `WiLoR`, `hamer`, `Video-Depth-Anything` (`GLASSESDATA_SRC`; the Menagerie also `MUJOCO_MENAGERIE`) |
+| `local/cache/` | `hand_landmarker.task` (shared with the receiver), `huggingface/` (`HF_HOME`), `torch/` (`TORCH_HOME`), `matplotlib/` (`MPLCONFIGDIR`), `warp/` (`WARP_CACHE_PATH`), `pip/`, ... |
+| `local/tmp/` | temporary files: the pipeline's own (SAM 2 frames), pytest's `local/tmp/pytest-pipeline`, and `TMPDIR` where the system does not set it (Linux; macOS always sets its own) |
+| `local/smoke/` | `omen_smoke.sh` logs |
+
+Importing `glassesdata_pipeline` sets these cache variables (and `TMPDIR`) when they are not set
+yet, before any heavy package loads, so `python -m glassesdata_pipeline ...` keeps everything
+inside the repository on its own; `scripts/local_dirs.sh` exports the same ones for the shell
+scripts. A variable you set yourself wins. Paths in the configuration files
+(`retarget.menagerie_path`, `hands2d.model_path`, `hands2d.repo_dir`, `depth.vda_repo_dir`, ...)
+are relative to the repository root. Step outputs go into the recording's `derived/` (RL runs in
+`derived/rl/`, the Rerun file in `derived/viz/`).
 
 ## Run on the Linux GPU laptop (Ubuntu 24.04, NVIDIA)
 
 ```sh
-Pipeline/scripts/setup_ubuntu.sh            # packages, venv ~/.venvs/glassesdata-pipeline, torch (CUDA), requirements,
-                                            # SAM 2, ~/src/mujoco_menagerie; --models downloads the weights; asks before sudo
+Pipeline/scripts/setup_ubuntu.sh            # packages, venv local/venv-pipeline, torch (CUDA), requirements,
+                                            # SAM 2, local/src/mujoco_menagerie; --models downloads the weights
+                                            # into local/cache; asks before sudo
 Pipeline/scripts/omen_smoke.sh [REC]        # first run: tests, synthetic end-to-end with gt and real models,
                                             # retarget/physics/Rerun, RL (MuJoCo CPU + Warp GPU), REC if given
 ```
 
-`omen_smoke.sh` writes every log into `~/glassesdata-smoke/<date>_<time>/` and ends with a summary
+`omen_smoke.sh` writes every log into `local/smoke/<date>_<time>/` and ends with a summary
 table (`summary.txt`); it keeps going after a failure. Set `MUJOCO_GL=egl` in shells that run the
 pipeline (MuJoCo's off-screen rendering on the NVIDIA GPU). RTX 50-series GPUs need a CUDA 12.8 or
 newer torch build; the setup script picks the wheel index from the driver (`--cuda cu130|cu128`).
@@ -115,7 +136,8 @@ every other step real; seeds 3 and 7, November 2026):
 | `glassesdata_pipeline/sim/` | MJCF scene + robot composition (`mjcf.compose`), replay, Shadow Hand tables, mink retargeting, physics check |
 | `glassesdata_pipeline/rl/` | tracking task, MuJoCo and MuJoCo Warp environments, PPO training, play |
 | `glassesdata_pipeline/viz/` | static figures `derived/viz/*.png`, Rerun export, `view REC` |
-| `scripts/` | `setup_ubuntu.sh`, `omen_smoke.sh` (Linux GPU laptop) |
+| `glassesdata_pipeline/paths.py` | the default folders in `local/`, cache variables, config path resolution |
+| `scripts/` | `setup_ubuntu.sh`, `omen_smoke.sh` (Linux GPU laptop), `local_dirs.sh` (cache variables for both) |
 | `requirements-core.txt`, `requirements.txt` | the Mac's packages; the full Linux install (pins also in `pyproject.toml` `[heavy]`) |
 
 ## Writing a step
@@ -132,8 +154,8 @@ To develop a step without the steps before it, `tests/fabricate.py` (hands2d / d
 recording's `gt/` with realistic noise:
 
 ```sh
-PYTHONPATH=.:tests $PY -c "import sys; from fabricate import fabricate_upstream; fabricate_upstream(sys.argv[1])" /tmp/synth_demo
-$PY -m glassesdata_pipeline run /tmp/synth_demo --steps slam,imu,world,arms --no-deps && $PY -m glassesdata_pipeline eval /tmp/synth_demo
+PYTHONPATH=.:tests $PY -c "import sys; from fabricate import fabricate_upstream; fabricate_upstream(sys.argv[1])" $DEMO
+$PY -m glassesdata_pipeline run $DEMO --steps slam,imu,world,arms --no-deps && $PY -m glassesdata_pipeline eval $DEMO
 ```
 
 Fabricated noise is white; the real chain's hand errors are partly slow (hand3d smooths its depth),

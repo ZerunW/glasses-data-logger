@@ -4,8 +4,8 @@ can be developed and tested before ``world``/``arms``/``objects`` exist.
 
 >>> import sys; sys.path.insert(0, "Pipeline/tests")       # pytest puts tests/ on sys.path itself
 >>> from fabricate_sim import fabricate_sim
->>> info = fabricate_sim("/tmp/synth_demo")                   # runs ingest first when needed
->>> # then: python -m glassesdata_pipeline run /tmp/synth_demo --steps scene,viz --no-deps
+>>> info = fabricate_sim("local/tmp/synth_demo")              # runs ingest first when needed
+>>> # then: python -m glassesdata_pipeline run local/tmp/synth_demo --steps scene,viz --no-deps
 
 Written into ``derived/`` (meta ``backend = "fabricated-gt"``):
 

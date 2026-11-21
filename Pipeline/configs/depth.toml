@@ -23,9 +23,10 @@ model = "small"
 batch_size = 8
 
 # --- video_depth_anything ---------------------------------------------------------------------------
-vda_repo_dir = ""          # the cloned Video-Depth-Anything repository
+vda_repo_dir = ""          # the cloned Video-Depth-Anything repository; "" = local/src/Video-Depth-Anything
+                           # ($GLASSESDATA_SRC replaces local/src); relative paths: to the repository root
 vda_encoder = "vits"       # "vits" | "vitb" | "vitl"
-vda_checkpoint = ""        # "" = <repo>/checkpoints/metric_video_depth_anything_<encoder>.pth
+vda_checkpoint = ""        # "" = <vda_repo_dir>/checkpoints/metric_video_depth_anything_<encoder>.pth
 vda_mode = "chunks"        # "chunks" (offline model on chunks) | "stream" (one frame at a time)
 vda_chunk_frames = 256     # frames per chunk in "chunks" mode (memory: chunk x H x W x 3 bytes)
 vda_input_size = 518       # network input size

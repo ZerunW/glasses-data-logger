@@ -18,7 +18,7 @@ import numpy as np
 import pytest
 
 from glassesdata_receiver import __main__ as cli
-from glassesdata_receiver import link, paths, usbmux, vcam
+from glassesdata_receiver import link, usbmux, vcam
 
 from test_usbmux import check_request, fake_usbmuxd, socket_path  # noqa: F401  (socket_path is a fixture)
 from test_vcam import FakeReceiver, frame, wait_for
@@ -95,45 +95,6 @@ def test_an_iphone_on_the_bus_without_usbmuxd_says_restart_it(monkeypatch, tmp_p
     assert link.apple_mobile_device_plugged()
     text = link.usbmuxd_unavailable(error)
     assert "usbmuxd is not running" in text and "sudo systemctl restart usbmuxd" in text
-
-
-# ---------------------------------------------------------------- folders: the localized Videos folder
-
-
-@pytest.fixture
-def linux_home(tmp_path, monkeypatch):
-    monkeypatch.setattr("sys.platform", "linux")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
-    (tmp_path / ".config").mkdir()
-    return tmp_path
-
-
-def test_recordings_follow_the_desktops_videos_folder(linux_home):
-    dirs = linux_home / ".config" / "user-dirs.dirs"
-    assert paths.recordings_dir() == linux_home / "Videos" / "GlassesData"  # no file
-    dirs.write_text('# written by xdg-user-dirs-update\nXDG_DESKTOP_DIR="$HOME/桌面"\nXDG_VIDEOS_DIR="$HOME/视频"\n', encoding="utf-8")
-    assert paths.recordings_dir() == linux_home / "视频" / "GlassesData"
-    dirs.write_text('XDG_VIDEOS_DIR="/data/clips"\n')
-    assert str(paths.recordings_dir()) == "/data/clips/GlassesData"
-    dirs.write_text('XDG_VIDEOS_DIR="$HOME/"\n')  # the home folder itself: the folder is turned off
-    assert paths.recordings_dir() == linux_home / "Videos" / "GlassesData"
-    dirs.write_text('XDG_VIDEOS_DIR="relative/clips"\n')  # not allowed by the specification
-    assert paths.recordings_dir() == linux_home / "Videos" / "GlassesData"
-
-
-def test_the_videos_folder_honours_xdg_config_home(linux_home, monkeypatch, tmp_path):
-    config = tmp_path / "elsewhere"
-    config.mkdir()
-    (config / "user-dirs.dirs").write_text('XDG_VIDEOS_DIR="$HOME/Movies2"\n')
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
-    assert paths.recordings_dir() == linux_home / "Movies2" / "GlassesData"
-
-
-def test_macos_ignores_user_dirs(linux_home, monkeypatch):
-    (linux_home / ".config" / "user-dirs.dirs").write_text('XDG_VIDEOS_DIR="$HOME/Clips"\n')
-    monkeypatch.setattr("sys.platform", "darwin")
-    assert paths.recordings_dir() == linux_home / "Movies" / "GlassesData"
 
 
 # ---------------------------------------------------------------- v4l2loopback: sysfs

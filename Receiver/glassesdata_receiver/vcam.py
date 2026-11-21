@@ -113,7 +113,7 @@ def setup_hint(platform: str | None = None) -> str:
 
 
 INSTALL_HINT = (
-    "Install it into the receiver's environment: ~/.venvs/glassesdata-receiver/bin/pip install pyvirtualcam, "
+    "Install it into the receiver's environment: local/venv/bin/pip install pyvirtualcam, "
     "then restart the receiver."
 )
 

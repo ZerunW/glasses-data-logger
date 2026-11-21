@@ -2,16 +2,17 @@
 
 Written for the Linux + CUDA machine; never run on the development Mac (no torch there).
 
-Install (outside this repository, e.g. ``~/src``)::
+Install (into the repository's gitignored ``local/src``, from the repository root)::
 
-    git clone https://github.com/DepthAnything/Video-Depth-Anything
-    cd Video-Depth-Anything && pip install -r requirements.txt
+    git clone https://github.com/DepthAnything/Video-Depth-Anything local/src/Video-Depth-Anything
+    cd local/src/Video-Depth-Anything && pip install -r requirements.txt
     # metric checkpoints into ./checkpoints/ (get_weights.sh fetches the relative ones):
     wget -P checkpoints https://huggingface.co/depth-anything/Metric-Video-Depth-Anything-Small/resolve/main/metric_video_depth_anything_vits.pth
     #   ... -Base/.../metric_video_depth_anything_vitb.pth, -Large/.../metric_video_depth_anything_vitl.pth
 
-then set ``depth.backend = "video_depth_anything"``, ``depth.vda_repo_dir = "~/src/Video-Depth-Anything"``
-and ``depth.vda_encoder = "vits" | "vitb" | "vitl"``.
+then set ``depth.backend = "video_depth_anything"`` and ``depth.vda_encoder = "vits" | "vitb" | "vitl"``
+(``depth.vda_repo_dir = ""`` finds ``local/src/Video-Depth-Anything``, or
+``$GLASSESDATA_SRC/Video-Depth-Anything``; another clone: set it, relative to the repository root).
 
 API used (from the repository's ``run.py`` / ``run_streaming.py``):
 
@@ -43,10 +44,12 @@ from typing import Any
 
 import numpy as np
 
+from .. import paths
 from ..errors import MissingDependency, PipelineError, require
 from .depth_anything import pick_device, resize_depth
 
 log = logging.getLogger(__name__)
+REPO_FOLDER = "Video-Depth-Anything"  # the clone's folder in local/src (or $GLASSESDATA_SRC)
 
 MODEL_CONFIGS = {
     "vits": {"encoder": "vits", "features": 64, "out_channels": [48, 96, 192, 384]},
@@ -55,13 +58,19 @@ MODEL_CONFIGS = {
 }
 
 
+def repo_dir(dcfg: Mapping[str, Any]) -> Path:
+    """``depth.vda_repo_dir`` (relative to the repository root), or ``paths.src_dir() / REPO_FOLDER`` when empty."""
+    value = str(dcfg.get("vda_repo_dir", "") or "")
+    return (paths.resolve(value) if value else paths.src_dir() / REPO_FOLDER).resolve()
+
+
 def _load(dcfg: Mapping[str, Any], stream: bool) -> tuple[Any, str, bool]:
     torch = require("torch", "torch", "depth backend video_depth_anything")
-    repo = Path(str(dcfg.get("vda_repo_dir", "") or ".")).expanduser().resolve()
+    repo = repo_dir(dcfg)
     if not (repo / "video_depth_anything").is_dir():
         raise MissingDependency(
             f"Video-Depth-Anything not found in {repo}: git clone https://github.com/DepthAnything/Video-Depth-Anything "
-            "and set depth.vda_repo_dir (needed for depth backend video_depth_anything)"
+            "there or set depth.vda_repo_dir (needed for depth backend video_depth_anything)"
         )
     if str(repo) not in sys.path:
         sys.path.insert(0, str(repo))
@@ -72,14 +81,15 @@ def _load(dcfg: Mapping[str, Any], stream: bool) -> tuple[Any, str, bool]:
     encoder = str(dcfg.get("vda_encoder", "vits"))
     if encoder not in MODEL_CONFIGS:
         raise PipelineError(f"depth.vda_encoder must be one of {sorted(MODEL_CONFIGS)}, got {encoder!r}")
-    checkpoint = Path(str(dcfg.get("vda_checkpoint", "") or repo / "checkpoints" / f"metric_video_depth_anything_{encoder}.pth"))
-    if not checkpoint.expanduser().is_file():
+    value = str(dcfg.get("vda_checkpoint", "") or "")
+    checkpoint = paths.resolve(value) if value else repo / "checkpoints" / f"metric_video_depth_anything_{encoder}.pth"
+    if not checkpoint.is_file():
         raise PipelineError(f"metric checkpoint {checkpoint} not found (see backends/video_depth_anything.py)")
     kwargs = dict(MODEL_CONFIGS[encoder])
     if not stream:
         kwargs["metric"] = True
     model = VideoDepthAnything(**kwargs)
-    model.load_state_dict(torch.load(str(checkpoint.expanduser()), map_location="cpu"), strict=True)
+    model.load_state_dict(torch.load(str(checkpoint), map_location="cpu"), strict=True)
     device = pick_device(str(dcfg.get("device", "auto")))
     model = model.to(device).eval()
     fp32 = not (bool(dcfg.get("fp16", True)) and device == "cuda")

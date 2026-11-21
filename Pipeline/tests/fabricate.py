@@ -4,8 +4,8 @@ developed and tested without the learned models.
 
 >>> import sys; sys.path.insert(0, "Pipeline/tests")       # the test modules do the same
 >>> from fabricate import fabricate_upstream
->>> info = fabricate_upstream("/tmp/synth_demo")              # runs ingest first when needed
->>> # then: python -m glassesdata_pipeline run /tmp/synth_demo --steps slam,imu,world,arms --no-deps
+>>> info = fabricate_upstream("local/tmp/synth_demo")         # runs ingest first when needed
+>>> # then: python -m glassesdata_pipeline run local/tmp/synth_demo --steps slam,imu,world,arms --no-deps
 
 * ``hands2d.npz`` - :func:`backends.gt.hands2d` (pixel noise, dropouts, invisible joints NaN).
 * ``depth/depth_f16.npy`` + ``depth/index.npz`` - :func:`backends.gt.depth_frames` (global scale

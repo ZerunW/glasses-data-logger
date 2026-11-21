@@ -3,13 +3,14 @@
 Written against the official package (https://github.com/facebookresearch/sam2, ``main``):
 
 * install (Linux + CUDA): ``pip install "git+https://github.com/facebookresearch/sam2.git"`` (the
-  repo's ``pip install -e .``); weights are fetched from the Hugging Face hub by
+  repo's ``pip install -e .``); weights are fetched from the Hugging Face hub (into
+  ``local/cache/huggingface``, :mod:`glassesdata_pipeline.paths`) by
   ``SAM2VideoPredictor.from_pretrained("facebook/sam2.1-hiera-large")`` (also ``-base-plus``,
   ``-small``, ``-tiny``; these ids are keys of ``sam2.build_sam.HF_MODEL_ID_TO_FILENAMES``).
 * ``predictor.init_state(video_path, offload_video_to_cpu=False, offload_state_to_cpu=False,
   async_loading_frames=False)`` - ``video_path`` is an ``.mp4`` (decoded with ``decord``) or a
   folder of ``<frame_index>.jpg``; we write a JPEG folder with PyAV-decoded frames (no decord
-  needed, and ``max_side`` downscales them).
+  needed, and ``max_side`` downscales them) in ``local/tmp`` and remove it afterwards.
 * ``predictor.add_new_points_or_box(state, frame_idx, obj_id, points=None, labels=None,
   clear_old_points=True, normalize_coords=True, box=None)`` - points ``(N, 2)`` xy pixels of the
   frames given to ``init_state``, labels 1 = positive, box ``[x0, y0, x1, y1]``.
@@ -25,7 +26,6 @@ from __future__ import annotations
 
 import logging
 import shutil
-import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -33,6 +33,7 @@ from typing import Any
 import numpy as np
 
 from .. import geometry as geo
+from .. import paths
 from ..errors import require
 from ..groundtruth import pack_mask
 
@@ -79,7 +80,7 @@ def video_masks(ep: Any, cfg: Any, prompts: list[dict[str, Any]], shape: tuple[i
     torch = require("torch", "torch", "objects.mask_backend = sam2")
     predictor = load_predictor(scfg)
     h, w = shape
-    tmp = Path(tempfile.mkdtemp(prefix="sam2_frames_"))
+    tmp = paths.make_tmp_dir("sam2_frames_")
     try:
         scale, n_frames = _write_frames(ep, tmp, int(scfg["max_side"]))
         tracks: dict[int, dict[int, np.ndarray]] = {i: {} for i in range(len(prompts))}

@@ -38,7 +38,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +45,7 @@ from typing import Any
 
 import numpy as np
 
+from .. import paths
 from ..errors import MissingDependency, PipelineError
 from .reference import JOINT_WIDTH, DemoReference, JointSpec, quat_blocks, reference_ctrl
 
@@ -538,9 +538,8 @@ def compose_rl_scene(ep: Any, robot_name: str, side: str, object_id: str, train:
     if not ep.has("sim/scene.xml"):
         raise PipelineError(f"{ep.path}: no derived/sim/scene.xml - run the scene step (or set train.scene.xml)")
     robot = robots.get_robot(robot_name)
-    menagerie = Path(str(scfg.get("menagerie_path") or ep.config.get("retarget.menagerie_path") or "~/src/mujoco_menagerie")).expanduser()
-    if not menagerie.is_dir() and os.environ.get("MUJOCO_MENAGERIE"):  # same fallback as steps/retarget.py
-        menagerie = Path(os.environ["MUJOCO_MENAGERIE"]).expanduser()
+    # same resolution as steps/retarget.py (default: local/src/mujoco_menagerie in the repository)
+    menagerie = paths.menagerie_dir(scfg.get("menagerie_path") or ep.config.get("retarget.menagerie_path") or "")
     if not menagerie.is_dir():
         raise PipelineError(f"MuJoCo Menagerie not found at {menagerie}: set retarget.menagerie_path "
                             "(or train.scene.menagerie_path, or $MUJOCO_MENAGERIE)")

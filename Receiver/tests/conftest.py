@@ -5,6 +5,15 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_configure(config):
+    """Temporary test folders go in the repository's local/tmp, never the system temp folder."""
+    if not config.option.basetemp:
+        local_tmp = Path(__file__).resolve().parents[2] / "local" / "tmp"
+        local_tmp.mkdir(parents=True, exist_ok=True)  # pytest creates only the last folder
+        config.option.basetemp = str(local_tmp / "pytest-receiver")
+
 from glassesdata_receiver import protocol as p  # noqa: E402
 
 # HEVC, 540x960, 30 fps, 266 frames, no B-frames, a keyframe every 12 frames.

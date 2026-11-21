@@ -1,7 +1,7 @@
 """Write a synthetic recording folder with ground truth (PIPELINE.md section 8).
 
 >>> from glassesdata_pipeline.synth import generate
->>> summary = generate("/tmp/synth_demo", seconds=8, seed=0, size=(360, 640))
+>>> summary = generate("local/tmp/synth_demo", seconds=8, seed=0, size=(360, 640))   # from the repository root
 
 The folder has the receiver's files (video.mp4, frames.csv, motion.csv, inputs.csv,
 device_state.csv, clock.csv, hands.csv, info.json), ``calibration.json`` (source "synthetic"),

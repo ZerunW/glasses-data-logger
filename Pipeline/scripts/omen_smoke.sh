@@ -3,10 +3,11 @@
 #
 # One command: every stage writes its own log into a timestamped folder, a failure does not stop
 # the next stages (a stage that needs a failed stage's output is skipped), and a summary table is
-# printed and saved at the end. Nothing is written into this repository.
+# printed and saved at the end. Everything (logs, recordings, caches, temporary files) goes into the
+# repository's gitignored local/ folder; nothing tracked by git is changed.
 #
 #   Pipeline/scripts/omen_smoke.sh                        synthetic stages 1-6
-#   Pipeline/scripts/omen_smoke.sh ~/Videos/GlassesData/REC   + stage 7 on a copy of a real recording
+#   Pipeline/scripts/omen_smoke.sh local/recordings/REC   + stage 7 on a copy of a real recording
 #
 # Stages:
 #   1 environment report (versions, GPU, EGL)      5 retarget, physics, viz with the Rerun export
@@ -16,27 +17,31 @@
 #     (hands stay gt) -> eval; then SAM 2 masks
 #
 # Options:
-#   --out DIR        log folder (default ~/glassesdata-smoke/<date>_<time>)
+#   --out DIR        log folder (default local/smoke/<date>_<time> in the repository)
 #   --seconds S      synthetic clip length (default 8)
 #   --seed N         synthetic seed (default 3)
 #   --skip-tests     skip stage 2
 #   --skip-train     skip stage 6
 #   -h, --help       show this help
 #
-# Environment: GLASSESDATA_PIPELINE_VENV (default ~/.venvs/glassesdata-pipeline),
-#              MUJOCO_MENAGERIE (default ~/src/mujoco_menagerie), MUJOCO_GL (default egl).
+# Environment: GLASSESDATA_PIPELINE_VENV (default local/venv-pipeline in the repository),
+#              MUJOCO_MENAGERIE (default local/src/mujoco_menagerie; GLASSESDATA_SRC replaces
+#              local/src), MUJOCO_GL (default egl); caches and TMPDIR: scripts/local_dirs.sh.
 # Exit code: 0 when every stage passed, 1 otherwise. Written on a Mac and checked with bash -n only.
 
 set -uo pipefail
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 PIPELINE_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd)
-readonly SCRIPT_DIR PIPELINE_DIR
-VENV=${GLASSESDATA_PIPELINE_VENV:-$HOME/.venvs/glassesdata-pipeline}
+REPO_DIR=$(cd -- "$PIPELINE_DIR/.." && pwd)
+readonly SCRIPT_DIR PIPELINE_DIR REPO_DIR
+# shellcheck source=local_dirs.sh
+source "$SCRIPT_DIR/local_dirs.sh"  # caches and TMPDIR into local/ (exported for every stage)
+VENV=${GLASSESDATA_PIPELINE_VENV:-$LOCAL_DIR/venv-pipeline}
 PY="$VENV/bin/python"
 readonly VENV PY
 export MUJOCO_GL=${MUJOCO_GL:-egl}
-export MUJOCO_MENAGERIE=${MUJOCO_MENAGERIE:-$HOME/src/mujoco_menagerie}
+export MUJOCO_MENAGERIE=${MUJOCO_MENAGERIE:-${GLASSESDATA_SRC:-$LOCAL_DIR/src}/mujoco_menagerie}
 export PYTHONUNBUFFERED=1
 
 OUT=""
@@ -72,7 +77,7 @@ if [[ -n $REAL && ! -f $REAL/video.mp4 ]]; then
     printf '%s is not a recording folder (no video.mp4)\n' "$REAL" >&2
     exit 2
 fi
-OUT=${OUT:-$HOME/glassesdata-smoke/$(date +%Y%m%d_%H%M%S)}
+OUT=${OUT:-$LOCAL_DIR/smoke/$(date +%Y%m%d_%H%M%S)}
 mkdir -p -- "$OUT" || exit 1
 OUT=$(cd -- "$OUT" && pwd)
 readonly OUT
@@ -216,6 +221,7 @@ printf '\n%s== 1 environment%s\n' "$BOLD" "$RESET"
         "$(git -C "$PIPELINE_DIR" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
     printf 'venv %s\nMUJOCO_GL=%s\nMUJOCO_MENAGERIE=%s (%s)\n' "$VENV" "$MUJOCO_GL" "$MUJOCO_MENAGERIE" \
         "$(git -C "$MUJOCO_MENAGERIE" log -1 --format='%h %cs' 2>/dev/null || echo 'missing')"
+    printf 'caches %s (HF_HOME %s, WARP_CACHE_PATH %s), TMPDIR %s\n' "$XDG_CACHE_HOME" "$HF_HOME" "$WARP_CACHE_PATH" "$TMPDIR"
     printf 'ffmpeg: %s\n\n' "$(ffmpeg -version 2>/dev/null | head -n 1 || echo missing)"
     nvidia-smi 2>&1 || echo "nvidia-smi failed"
     echo

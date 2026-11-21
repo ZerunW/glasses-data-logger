@@ -1,7 +1,7 @@
 """Preview images of a synthetic recording: decoded frames, ground-truth overlay, depth.
 
 >>> from glassesdata_pipeline.synth.preview import write_previews
->>> write_previews("/tmp/synth_demo", "/tmp/previews")   # frame_*.png, overlay_*.png, depth_*.png, contact sheet
+>>> write_previews("local/tmp/synth_demo", "local/tmp/previews")   # frame_*.png, overlay_*.png, depth_*.png, contact sheet
 """
 
 from __future__ import annotations

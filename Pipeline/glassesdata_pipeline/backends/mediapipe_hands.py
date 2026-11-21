@@ -1,10 +1,10 @@
 """MediaPipe Tasks HandLandmarker backend of step ``hands2d`` (Mac and Linux, CPU).
 
-* Model file ``hand_landmarker.task``: ``hands2d.model_path`` when set, else the receiver's cache
-  (macOS ``~/Library/Caches/GlassesData/``, elsewhere ``$XDG_CACHE_HOME/glassesdata/`` or
-  ``~/.cache/glassesdata/``; same folders as ``Receiver/glassesdata_receiver/paths.py``). When the
-  file is missing it is downloaded from Google's official URL only if ``hands2d.allow_download``
-  is true and the environment variable ``GLASSESDATA_NO_DOWNLOAD`` is not set (tests set it).
+* Model file ``hand_landmarker.task``: ``hands2d.model_path`` when set (relative to the
+  repository root), else the repository's ``local/cache/`` (the receiver's copy: same folder as
+  ``Receiver/glassesdata_receiver/paths.py``). When the file is missing it is downloaded there
+  from Google's official URL only if ``hands2d.allow_download`` is true and the environment
+  variable ``GLASSESDATA_NO_DOWNLOAD`` is not set (tests set it).
 * VIDEO running mode over every frame (MediaPipe tracks between frames, so timestamps, taken from
   the timeline, must increase), ``num_hands = 2``.
 * Coordinates: MediaPipe's normalized ``x, y`` are fractions of the image width/height measured
@@ -29,7 +29,6 @@ import hashlib
 import logging
 import math
 import os
-import sys
 import tempfile
 import urllib.request
 from collections.abc import Iterable, Mapping, Sequence
@@ -39,6 +38,7 @@ from typing import Any
 
 import numpy as np
 
+from .. import paths
 from ..errors import MissingDependency, PipelineError
 
 log = logging.getLogger(__name__)
@@ -62,12 +62,8 @@ SOURCE_NONE, SOURCE_LABEL, SOURCE_CONTINUITY, SOURCE_SCORE = 0, 1, 2, 3
 
 
 def cache_dir() -> Path:
-    """The receiver's cache folder (``Receiver/glassesdata_receiver/paths.py:cache_dir``)."""
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Caches" / "GlassesData"
-    value = os.environ.get("XDG_CACHE_HOME", "")
-    base = Path(value) if value and os.path.isabs(value) else Path.home() / ".cache"
-    return base / "glassesdata"
+    """``local/cache`` in the repository, shared with the receiver (``glassesdata_receiver.paths.cache_dir``)."""
+    return paths.cache_dir()
 
 
 def default_model_path() -> Path:
@@ -79,7 +75,7 @@ def resolve_model(model_path: str | os.PathLike[str] | None = None, allow_downlo
     """The model file to use; downloads it to the cache when missing and allowed. A download is
     saved only when its SHA-256 equals ``sha256`` (``""`` / None: no check)."""
     if model_path:
-        path = Path(model_path).expanduser()
+        path = paths.resolve(model_path)
         if not path.is_file():
             raise PipelineError(f"hands2d.model_path {path} does not exist")
         return path

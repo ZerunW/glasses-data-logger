@@ -7,16 +7,17 @@ model and left-hand mirroring): 21 joints in MediaPipe order (WiLoR's MANO wrapp
 projection, ``joints_cam_model[T,2,21,3]`` (the model's camera-frame joints with the calibrated
 focal length) and ``mp_world`` (those joints relative to the palm centre).
 
-Install (outside this repository)::
+Install (into the repository's gitignored ``local/src``; ``scripts/setup_ubuntu.sh --with-wilor`` does it)::
 
-    git clone --recursive https://github.com/rolpotamias/WiLoR && cd WiLoR
+    git clone --recursive https://github.com/rolpotamias/WiLoR local/src/WiLoR && cd local/src/WiLoR
     pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121   # match the driver
     pip install -r requirements.txt
     wget https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models/detector.pt -P ./pretrained_models/
     wget https://huggingface.co/spaces/rolpotamias/WiLoR/resolve/main/pretrained_models/wilor_final.ckpt -P ./pretrained_models/
     # MANO: register at https://mano.is.tue.mpg.de, download, put MANO_RIGHT.pkl in ./mano_data/
 
-then ``hands2d.backend = "wilor"``, ``hands2d.repo_dir = "/path/to/WiLoR"``. ``load_wilor`` and the
+then ``hands2d.backend = "wilor"`` (``hands2d.repo_dir = ""`` finds ``local/src/WiLoR``, or
+``$GLASSESDATA_SRC/WiLoR``; another clone: set ``hands2d.repo_dir``). ``load_wilor`` and the
 detector read ``./pretrained_models`` and ``./mano_data`` relative to the working directory, so
 models are loaded with the repository as the working directory.
 
@@ -44,7 +45,7 @@ log = logging.getLogger(__name__)
 
 def hands2d(ep: Any, cfg: Mapping[str, Any]) -> dict[str, np.ndarray]:
     hcfg = cfg.get("hands2d", {}) or {}
-    repo = common.repo_dir(hcfg, "wilor", "WiLoR")
+    repo = common.repo_dir(hcfg, "wilor", "WiLoR", "WiLoR")
     torch = require("torch", "torch", "hands2d backend wilor")
     try:
         from ultralytics import YOLO  # type: ignore[import-not-found]
