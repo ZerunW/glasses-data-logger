@@ -1,0 +1,76 @@
+# Step "hand3d": metric 3D hand joints in the camera frame + the depth map's scale -> derived/hand3d.npz
+# (PIPELINE.md section 5; the method is described in steps/hand3d.py).
+[hand3d]
+# --- shape -------------------------------------------------------------------------------------------
+# "scale": mp_world times the median ratio (user bone length / mp_world bone length) over scale_bones;
+# "retarget": additionally every bone gets the user's length along mp_world's direction.
+shape_mode = "scale"
+# Bones (by child joint index, MediaPipe order) used for that ratio: wrist->MCP and proximal phalanges.
+scale_bones = [5, 9, 13, 17, 6, 10, 14, 18]
+# The per-frame ratio is noisy (bone lengths of mp_world fluctuate); a running median over this
+# many seconds per hand is used instead (0 = per frame).
+shape_scale_window_s = 1.0
+
+# --- PnP ---------------------------------------------------------------------------------------------
+min_score = 0.3            # keypoints with a lower score are ignored
+min_joints = 8             # a hand needs at least this many usable keypoints
+huber_px = 3.0             # Huber threshold of the reprojection error (pixels at 720 px width; scaled)
+max_reproj_frac = 0.1      # valid when RMS reprojection error <= this fraction of the hand's 2D box diagonal
+depth_range_m = [0.08, 1.5]  # the hand centre must lie this far in front of the camera
+# Flip ambiguity: candidates with RMS error <= best * ambiguity_ratio + ambiguity_px (px at 720 width)
+# are ranked by the priors below (angle to the shape's own camera-aligned orientation, to the
+# previous frame's rotation, and the mismatch of relative palm depths with the depth map).
+ambiguity_ratio = 1.5
+ambiguity_px = 1.0
+prior_sigma_deg = 35.0     # scale of the "shape orientation" prior
+prev_sigma_deg = 15.0      # scale of the "previous rotation" prior per sqrt(frame gap)
+prev_max_gap = 12          # frames: older rotations are not used as a prior
+depth_rel_sigma = 0.01     # scale of the relative-depth mismatch (fraction of the hand depth)
+depth_flip_prior = true    # use the depth map to resolve the flip ambiguity
+# Orientation prior inside the refinement: the shape's own orientation (mp_world is camera-aligned)
+# with this standard deviation, against keypoints with kp_sigma_px noise (px at 720 width; scaled).
+# It fixes the weakly observed out-of-plane rotation of a nearly flat hand. 0 = no prior.
+orientation_sigma_deg = 10.0
+kp_sigma_px = 3.0
+# Frame of mp_world's orientation: "camera" (axes parallel to the camera's) or "ray" (rotated so
+# that its z axis points along the ray through the hand), or "auto": "ray" for mediapipe (measured
+# on a real clip: the free PnP rotation is ~10 deg from ray-aligned, ~30 deg from camera-aligned),
+# "camera" for gt, wilor and hamer (their joints are placed in the camera frame already).
+shape_frame = "auto"
+
+# --- depth scale (depth_scale = metric / model) -------------------------------------------------------
+use_depth = true
+# Joints where the depth map is sampled. The MCPs (5, 9, 13, 17) by default; the wrist (0) is left
+# out because its visible surface is ambiguous (forearm, sleeve, watch strap).
+depth_joints = [5, 9, 13, 17]
+# The depth model sees the skin, not the joint centre: the MCP joints lie about half the palm
+# thickness (~1.3-1.5 cm) behind the visible surface; the wrist about half the wrist thickness or
+# more with a sleeve (the synthetic renderer's arm capsule puts it 3 cm deep).
+skin_offset_m = 0.014
+skin_offset_wrist_m = 0.025
+# Palms seen more edge-on than this give no scale sample (their far joints hide behind the hand and
+# grazing depth is unreliable); below it the offsets grow as 1 / cos(angle) (at most 2x).
+max_palm_obliquity_deg = 60.0
+depth_sample_radius = 1    # median over a (2r+1)^2 window of the depth grid around each palm joint
+min_depth_samples = 3      # palm joints with depth needed for a hand's ratio
+scale_median_window_s = 0.5  # running median (robust first estimate)
+scale_cutoff_s = 2.0       # Whittaker smoother: variations faster than this period are smoothed out
+scale_huber_k = 1.345      # Huber threshold in robust standard deviations
+scale_min_observations = 5 # fewer frames with a ratio -> the global median is used everywhere
+default_scale = 1.0        # no frame with a ratio at all -> the depth model is taken as metric
+
+# --- fusion of PnP depth and scaled depth-map depth ------------------------------------------------------
+fuse_depth = true
+pnp_depth_sigma = 0.03     # relative error of a single-frame PnP depth
+depthmap_depth_sigma = 0.03  # relative error of the scaled depth-map depth at the palm
+fuse_max_change = 0.25     # a larger implied correction is treated as an outlier (no fusion)
+
+# --- temporal smoothing of each hand's depth along its ray ------------------------------------------------
+# Cut-off period (seconds) of a robust smoother of the palm-centre depth per run of valid frames;
+# 0 = off. The per-frame PnP depth is the noisiest coordinate; the hand moves smoothly at video rate.
+hand_depth_cutoff_s = 0.5
+hand_depth_max_gap = 3     # frames: runs of valid frames separated by longer gaps are smoothed separately
+
+# --- ray snap --------------------------------------------------------------------------------------------
+# Move each detected joint onto its observed ray at its depth (0 = off, 1 = fully).
+ray_snap = 0.0

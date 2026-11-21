@@ -1,0 +1,32 @@
+# Step "depth": per-frame z-depth maps -> derived/depth/depth_f16.npy + index.npz (PIPELINE.md section 5).
+[depth]
+# "depth_anything_v2" (default; transformers, Linux + CUDA) | "video_depth_anything" (temporally
+# consistent; needs its repository, see backends/video_depth_anything.py) | "gt" (synthetic).
+backend = "depth_anything_v2"
+# Output grid = the video frame downsampled by this factor (720x1280 -> 180x320 at 4).
+downsample = 4
+# Depth for every stride-th frame only (1 = every frame). hand3d interpolates the scale between them.
+stride = 1
+# The backend outputs Euclidean ray distance instead of z: convert (z = distance / |(x, y, 1)|).
+# Depth Anything V2 metric predicts planar z (false).
+ray_distance = false
+# "auto" (cuda > mps > cpu) | "cuda" | "mps" | "cpu".
+device = "auto"
+# Half precision on CUDA.
+fp16 = true
+
+# --- depth_anything_v2 ---------------------------------------------------------------------------
+# "small" | "base" | "large" (Depth-Anything-V2-Metric-Indoor-*-hf) or any Hugging Face model id,
+# e.g. "depth-anything/Depth-Anything-V2-Metric-Outdoor-Small-hf".
+model = "small"
+# Frames per forward pass.
+batch_size = 8
+
+# --- video_depth_anything ---------------------------------------------------------------------------
+vda_repo_dir = ""          # the cloned Video-Depth-Anything repository
+vda_encoder = "vits"       # "vits" | "vitb" | "vitl"
+vda_checkpoint = ""        # "" = <repo>/checkpoints/metric_video_depth_anything_<encoder>.pth
+vda_mode = "chunks"        # "chunks" (offline model on chunks) | "stream" (one frame at a time)
+vda_chunk_frames = 256     # frames per chunk in "chunks" mode (memory: chunk x H x W x 3 bytes)
+vda_input_size = 518       # network input size
+vda_fps = 24.0             # frame rate passed to the model

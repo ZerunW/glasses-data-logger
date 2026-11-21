@@ -1,0 +1,43 @@
+# Step "hands2d": 2D hand keypoints for every frame -> derived/hands2d.npz (PIPELINE.md section 5).
+[hands2d]
+# "mediapipe" (default, CPU, Mac and Linux) | "gt" (synthetic recordings: gt/ + [synth.gt_noise])
+# | "wilor" | "hamer" (Linux + CUDA, need the MANO model; see backends/wilor.py, backends/hamer.py).
+backend = "mediapipe"
+
+# --- mediapipe ---------------------------------------------------------------------------------
+# hand_landmarker.task; "" = the receiver's cache (macOS ~/Library/Caches/GlassesData/,
+# Linux ~/.cache/glassesdata/).
+model_path = ""
+# Download the model from Google's official URL when it is missing (never when the environment
+# variable GLASSESDATA_NO_DOWNLOAD is set, as the tests do).
+allow_download = true
+num_hands = 2
+min_detection_confidence = 0.5   # palm detector
+min_presence_confidence = 0.5    # landmark model: below this the hand is re-detected
+min_tracking_confidence = 0.5    # VIDEO mode tracking between frames
+# The glasses video is not mirrored; MediaPipe's labels then already name the person's own hand
+# (measured by the receiver). Set true only for a mirrored (selfie) source.
+mirrored_input = false
+# Slot resolution (0 = left, 1 = right): a single detection whose label points at an empty slot
+# keeps the other slot when its wrist is within keep_slot_frac x image width of that slot's last
+# wrist and its handedness score is below trust_label_score (label flicker).
+keep_slot_frac = 0.08
+trust_label_score = 0.9
+# A slot's last wrist is remembered for this many frames (temporal continuity).
+continuity_frames = 12
+
+# --- wilor / hamer (Linux + CUDA) ------------------------------------------------------------------
+# Folder of the cloned repository (contains pretrained_models/ or _DATA/ and mano_data/); "" = the
+# current working directory. See the module docstrings for the install steps.
+repo_dir = ""
+# Hand detector confidence (WiLoR's YOLO detector; HaMeR's ViTPose hand keypoints).
+detector_confidence = 0.3
+# Crop size factor around the detected box (both demos use 2.0).
+rescale_factor = 2.0
+# Images per forward pass.
+batch_size = 16
+# "auto" (cuda > cpu) | "cuda" | "cpu".
+device = "auto"
+fp16 = false                     # wilor: half precision crops on CUDA
+# hamer: hand boxes from "mediapipe" (works egocentric) or "vitpose" (HaMeR demo: needs a visible body).
+hamer_detector = "mediapipe"
