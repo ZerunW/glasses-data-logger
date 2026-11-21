@@ -194,10 +194,30 @@ def _eval_hand3d(ep, gt, ecfg, curves, T):
     valid = np.asarray(d.get("valid", np.ones((T, 2), bool)), dtype=bool)
     mask = valid[..., None] & (np.asarray(gt["visible"], bool) if ecfg.get("hands_visible_only", False) else True)
     out = M.joint_errors(d["joints_cam"], gt["joints_cam"], mask)
+    out.update(M.hand_camera_errors(d["joints_cam"], gt["joints_cam"], mask))
     curves["hand3d_error"] = M.per_frame_joint_error(d["joints_cam"], gt["joints_cam"], valid)
     if "depth_scale_smooth" in d:
         out["depth_scale_smooth_mean"] = float(np.nanmean(d["depth_scale_smooth"])) if np.any(np.isfinite(d["depth_scale_smooth"])) else None
+        truth = _depth_scale_truth(ep)
+        if truth is not None and len(truth) == len(d["depth_scale_smooth"]):
+            out["depth_scale"] = M.depth_scale_errors(d["depth_scale_smooth"], d.get("depth_scale"), truth)
+            curves["depth_scale_rel_error"] = np.asarray(d["depth_scale_smooth"], dtype=np.float64) / truth - 1.0
     return out
+
+
+def _depth_scale_truth(ep) -> np.ndarray | None:
+    """True ``metric / model`` ratio per frame when ``derived/depth`` came from the gt backend (its
+    noise parameters are read from the depth output's meta), else None."""
+    if not ep.has("depth/index.npz"):
+        return None
+    meta = ep.load_npz("depth/index").get("meta", {}) or {}
+    if meta.get("backend") != "gt":
+        return None
+    from ..backends import gt as gtb
+
+    noise = ((meta.get("params") or {}).get("synth") or {}).get("gt_noise")
+    cfg = {"synth": {"gt_noise": noise}} if noise is not None else ep.config
+    return 1.0 / np.asarray(gtb.depth_scale_truth(ep, cfg), dtype=np.float64)
 
 
 def _eval_hands_world(ep, gt, ecfg, curves, T):
@@ -211,6 +231,12 @@ def _eval_hands_world(ep, gt, ecfg, curves, T):
         J0 = np.asarray(gt["joints_world"])[0]  # bone lengths are constant over time
         true = np.stack([np.linalg.norm(J0[:, i] - J0[:, PARENTS[i]], axis=-1) for i in range(1, 21)], axis=-1)
         out["bone_length_error_mm"] = float(np.nanmean(np.abs(np.asarray(d["bone_lengths"]) - true)) * 1000)
+        # lengths of the output skeleton itself (bone_lengths above are the refinement targets)
+        got = np.stack([np.linalg.norm(J[:, :, i] - J[:, :, PARENTS[i]], axis=-1) for i in range(1, 21)], axis=-1)
+        out["joints_bone_length_error_mm"] = float(np.nanmean(np.abs(got - true[None])) * 1000) if np.isfinite(got).any() else None
+    if "raw" in d:  # before smoothing (hand3d mapped to the world)
+        raw = np.asarray(d["raw"], dtype=np.float64)
+        out["raw_mpjpe"] = M.joint_errors(raw, gt["joints_world"], np.all(np.isfinite(raw), axis=-1), procrustes=False).get("mpjpe")
     curves["hands_world_error"] = M.per_frame_joint_error(J, gt["joints_world"], np.any(valid, axis=-1))
     return out
 
@@ -229,6 +255,10 @@ def _eval_arms(ep, gt, ecfg, curves, T):
         out["wrist"] = M.point_errors(pred, np.asarray(gt["joints_world"])[:, :, 0], np.all(np.isfinite(pred), axis=-1))
     if "elbow" in d:
         curves["elbow_error"] = np.linalg.norm(np.asarray(d["elbow"], dtype=np.float64) - gt["elbow_world"], axis=-1)
+        if "method" in d:  # 1 = forearm cue, 2 = prior only
+            method = np.asarray(d["method"])
+            for code, name in ((1, "elbow_cue_frames"), (2, "elbow_prior_frames")):
+                out[name] = M._stats(np.where(method == code, curves["elbow_error"], np.nan))
     return out
 
 
@@ -259,12 +289,57 @@ def _eval_objects(ep, gt, ecfg, curves, T):
         used.add(k)
         res = M.object_pose_errors(est, gt_T[:, k], valid)
         res["matched_gt"] = ids[k]
+        res.update(_object_extras(ep, gt, item, oid, k, d, est, valid))
         out["objects"][oid] = res
         curves[f"object_{oid}_translation_error"] = np.where(valid, np.linalg.norm(est[:, :3, 3] - gt_T[:, k, :3, 3], axis=-1), np.nan)
     if ep.has("objects/table.json"):
         table = ep.load_json("objects/table.json")
         if "height_m" in table:
             out["table_height_error_m"] = float(table["height_m"]) - float(gt["table_height_m"])
+        out["table"] = _table_extras(table, gt)
+    return out
+
+
+def _object_extras(ep, gt, item, oid, k, d, est, valid) -> dict[str, Any]:
+    """Size, per-phase pose errors (static / grasped, from gt grasped), grasp labels and how many
+    prompts fall inside the matched object's ground-truth mask."""
+    out: dict[str, Any] = {}
+    gt_T = np.asarray(gt["T_world_obj"], dtype=np.float64)[:, k]
+    held = np.asarray(gt["grasped"], dtype=bool)[:, k].any(axis=-1) if "grasped" in gt else np.zeros(len(est), bool)
+    out["phases"] = {name: M.object_pose_errors(est, gt_T, valid & m)
+                     for name, m in (("static", ~held), ("grasped", held)) if np.any(valid & m)}
+    if ep.has(f"objects/{oid}/props.json"):
+        props = ep.load_json(f"objects/{oid}/props.json")
+        if "extent_m" in props:
+            out["size"] = M.object_size_errors(props["extent_m"], np.asarray(gt["object_sizes"])[k], props.get("volume_m3"))
+    if "grasped" in d and "grasped" in gt:
+        out["grasp"] = M.grasp_label_errors(d["grasped"], np.asarray(gt["grasped"])[:, k])
+    hits = {"auto": [], "manual": []}
+    for prompt in item.get("prompts", [item.get("prompt", {})]):
+        try:
+            m = gt.mask(int(prompt["frame"]), k)
+            hit = bool(m[int(round(prompt["y"])), int(round(prompt["x"]))])
+        except (KeyError, IndexError, TypeError):
+            continue
+        hits["manual" if prompt.get("source") == "manual" else "auto"].append(hit)
+    out["prompt_hits"] = {f"{s}_hit_rate": (float(np.mean(v)) if v else None) for s, v in hits.items()}
+    out["prompt_hits"]["n_auto"] = len(hits["auto"])
+    return out
+
+
+def _table_extras(table, gt) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if table.get("top_z") is not None and "table_top_z" in gt:
+        out["top_z_error_m"] = float(table["top_z"]) - float(gt["table_top_z"])
+    poly = np.asarray(table.get("polygon", []), dtype=np.float64).reshape(-1, 2)
+    if len(poly) >= 3 and "table_polygon" in gt:
+        from ..core.plane import convex_polygon_iou
+
+        r = convex_polygon_iou(poly, np.asarray(gt["table_polygon"], dtype=np.float64))
+        out.update(polygon_iou=r["iou"], polygon_precision=r["frac_a"], polygon_coverage=r["frac_b"])
+    if "normal" in table:
+        n = np.asarray(table["normal"], dtype=np.float64)
+        out["normal_tilt_deg"] = float(np.degrees(np.arccos(np.clip(abs(n[2]) / np.linalg.norm(n), -1, 1))))
     return out
 
 

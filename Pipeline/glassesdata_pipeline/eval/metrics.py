@@ -149,6 +149,44 @@ def joint_errors(pred: np.ndarray, gt: np.ndarray, valid: np.ndarray | None = No
     return out
 
 
+def hand_camera_errors(pred: np.ndarray, gt: np.ndarray, valid: np.ndarray | None = None) -> dict[str, Any]:
+    """Camera-frame hand errors of ``(T, 2, 21, 3)`` joints (metres): per-joint distance statistics,
+    the wrist (root) position error and the wrist depth error (signed bias and absolute value).
+    ``valid`` is ``(T, 2)`` or ``(T, 2, 21)``."""
+    pred = np.asarray(pred, dtype=np.float64)
+    gt = np.asarray(gt, dtype=np.float64)
+    m = np.all(np.isfinite(pred), axis=-1) & np.all(np.isfinite(gt), axis=-1)
+    if valid is not None:
+        v = np.asarray(valid, dtype=bool)
+        m &= v[..., None] if v.ndim == pred.ndim - 2 else v
+    err = np.linalg.norm(pred - gt, axis=-1)
+    root = m[..., 0]
+    dz = pred[..., 0, 2] - gt[..., 0, 2]
+    out: dict[str, Any] = {
+        "joint_error_m": _stats(err[m]),
+        "wrist_error_m": _stats(err[..., 0][root]),
+        "wrist_depth_abs_error_m": _stats(np.abs(dz[root])),
+        "wrist_depth_bias_m": float(np.mean(dz[root])) if np.any(root) else float("nan"),
+    }
+    rel = (pred - pred[..., :1, :]) - (gt - gt[..., :1, :])
+    out["root_relative_error_m"] = _stats(np.linalg.norm(rel, axis=-1)[m & root[..., None]])
+    return out
+
+
+def depth_scale_errors(smooth: np.ndarray, raw: np.ndarray | None, truth: np.ndarray) -> dict[str, Any]:
+    """Relative error of an estimated ``metric / model`` depth scale against the truth (per frame):
+    ``est / truth - 1`` for the smoothed curve (all frames) and the raw per-frame ratios."""
+    truth = np.asarray(truth, dtype=np.float64)
+    rel = np.asarray(smooth, dtype=np.float64) / truth - 1.0
+    out: dict[str, Any] = {"smooth_rel_abs": _stats(np.abs(rel)), "smooth_rel_bias": float(np.nanmean(rel))}
+    if raw is not None:
+        r = np.asarray(raw, dtype=np.float64) / truth - 1.0
+        out["raw_rel_abs"] = _stats(np.abs(r))
+        out["raw_rel_bias"] = float(np.nanmedian(r)) if np.any(np.isfinite(r)) else float("nan")
+        out["raw_frames"] = int(np.sum(np.isfinite(r)))
+    return out
+
+
 def per_frame_joint_error(pred: np.ndarray, gt: np.ndarray, valid: np.ndarray | None = None) -> np.ndarray:
     """``(T, 2)`` mean joint error per frame and hand (NaN where invalid)."""
     err = np.linalg.norm(np.asarray(pred, dtype=np.float64) - np.asarray(gt, dtype=np.float64), axis=-1)
@@ -193,6 +231,37 @@ def object_pose_errors(est: np.ndarray, gt: np.ndarray, valid: np.ndarray | None
     d_gt = gt[m, :3, :3] @ np.swapaxes(gt[first, :3, :3], -1, -2)
     rot = np.degrees(geo.rotation_angle(d_est, d_gt))
     return {"translation_m": _stats(trans), "rotation_change_deg": _stats(rot), "n": int(m.sum())}
+
+
+def object_size_errors(extent: np.ndarray, gt_size: np.ndarray, volume: float | None = None) -> dict[str, Any]:
+    """Object-frame extents (x, y, z; z up) against a box's full extents (z up): the two
+    horizontal extents are compared sorted (the object frame's x/y choice is arbitrary).
+    ``volume`` (the mesh volume) is compared with the box volume."""
+    e = np.asarray(extent, dtype=np.float64)
+    g = np.asarray(gt_size, dtype=np.float64)
+    est = np.r_[np.sort(e[:2])[::-1], e[2]]
+    true = np.r_[np.sort(g[:2])[::-1], g[2]]
+    err = est - true
+    out = {"est_m": est.tolist(), "true_m": true.tolist(), "error_m": err.tolist(),
+           "abs_mean_m": float(np.mean(np.abs(err)))}
+    if volume is not None:
+        out["volume_rel_error"] = float(volume) / float(np.prod(true)) - 1.0
+    return out
+
+
+def grasp_label_errors(est: np.ndarray, gt: np.ndarray) -> dict[str, Any]:
+    """Per-frame ``grasped`` labels ``(T, 2)``: accuracy, precision, recall and the onset / release
+    frame differences of the first labelled interval (any hand)."""
+    e = np.asarray(est, dtype=bool)
+    g = np.asarray(gt, dtype=bool)
+    tp = int(np.sum(e & g))
+    out: dict[str, Any] = {"frame_accuracy": float(np.mean(e == g)),
+                           "precision": tp / max(int(e.sum()), 1), "recall": tp / max(int(g.sum()), 1)}
+    ea, ga = np.flatnonzero(e.any(axis=1)), np.flatnonzero(g.any(axis=1))
+    if len(ea) and len(ga):
+        out["onset_error_frames"] = int(ea[0] - ga[0])
+        out["release_error_frames"] = int(ea[-1] - ga[-1])
+    return out
 
 
 # ---------------------------------------------------------------- IMU

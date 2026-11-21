@@ -1,0 +1,157 @@
+# Step "objects": unknown objects from monocular video + metric depth + hand tracking
+# (PIPELINE.md section 5: derived/objects/). No CAD model or category is assumed.
+[objects]
+# Masks: "gt" (synthetic recordings only: gt/masks.npz) or "sam2" (SAM 2.1 video predictor,
+# Linux + CUDA; see [objects.sam2]).
+mask_backend = "sam2"
+# Visual mesh: "hull" (numpy convex hull, default, runs anywhere), "open3d" (Poisson or alpha
+# shape, [objects.open3d]) or "image_to_3d" (generated shape aligned to the fused points,
+# [objects.image_to_3d]).
+mesh_backend = "hull"
+# Collision geometry: "hull" (one convex part = convex hull of the visual mesh) or "coacd"
+# (approximate convex decomposition, [objects.coacd]).
+collision_backend = "hull"
+# Manual prompts in full-resolution video pixels, e.g. [{frame = 0, x = 410, y = 700}];
+# optional "box" = [x0, y0, x1, y1]. Each becomes (or joins) an object.
+prompts = []
+# Automatic prompts from detected grasps ([objects.grasp]).
+auto_prompts = true
+# Two prompts are the same object when their masks overlap with at least this mean IoU on the
+# frames both have.
+merge_iou = 0.5
+# Physical properties written to props.json: mass = density x volume of the closed mesh.
+density_kg_m3 = 500.0
+friction = [0.8, 0.02, 0.001]   # MuJoCo order: sliding, torsional, rolling
+# Pixels of the hands are excluded from object and table points: a disc of this radius (m,
+# projected) around every hand joint and bone of hands_world (and hands2d keypoints).
+hand_radius_m = 0.012
+# Depth pixels used for geometry: masks are eroded by this many depth pixels (mixed depth at
+# object borders), depth outside [min_depth_m, max_depth_m] is ignored.
+erode_px = 1
+min_depth_m = 0.1
+max_depth_m = 4.0
+
+[objects.grasp]
+# Grasp episodes from hands_world (core/grasp.py). Aperture = thumb tip to index tip.
+smooth_s = 0.06              # Gaussian smoothing of the joints before detection (seconds)
+close_drop_m = 0.03          # the aperture must drop by at least this ...
+close_ratio = 0.75           # ... and to at most this fraction of the open aperture
+open_window_s = 1.0          # the open aperture is the maximum over this many seconds before
+settle_frac = 0.15           # onset = aperture within this fraction of (open - closed) above its minimum
+release_frac = 0.5           # release when the aperture re-opens past closed + this x (open - closed)
+release_frames = 3           # ... for this many frames
+slow_mps = 0.30              # the wrist is slower than this at onset
+speed_window_s = 0.12        # speed by central differences over +-this
+move_m = 0.05                # the wrist moves at least this far after onset while closed ...
+move_window_s = 2.0          # ... within this time
+min_duration_s = 0.3         # shorter episodes are ignored
+max_gap_s = 0.5              # a hand missing longer than this ends the episode
+near_surface_m = 0.08        # the grasp point is within this of the observed depth surface at onset
+# Grasp point: "thumb_fingers" (thumb tip and the mean of the other fingertips) or "thumb_index".
+point = "thumb_fingers"
+# Prompt frame: the frame in [onset - lookback_s, onset] where the projected grasp point is
+# farthest from the projected hand (least occluded); the object is still static there.
+lookback_s = 0.6
+# Snap the prompt pixel to the depth pixel (within snap_radius_m of the grasp point, projected)
+# whose 3-D point is nearest to the grasp point.
+snap = true
+snap_radius_m = 0.04
+prompt_box_m = 0.05          # half size of the prompt box around the grasp point (m, projected)
+
+[objects.fusion]
+# Shape from the frames before the first grasp (the object is static there).
+method = "tsdf"              # "tsdf" (ray-wise averaging, robust to depth noise) or "points"
+margin_s = 0.25              # stop this long before the first grasp onset
+max_frames = 120             # at most this many frames (evenly spaced)
+voxel_m = 0.004              # TSDF voxel / point-cloud voxel size
+trunc_m = 0.04               # TSDF truncation (should exceed ~2x the depth noise at the object)
+min_weight = 4.0             # voxels need this many observations to produce surface points
+carve = false                # free-space updates from non-object pixels clearly behind the voxels (rarely adds
+                             # surface with eroded masks; costs time)
+bounds_margin_m = 0.04       # TSDF box = robust bounds of the masked points + this
+max_size_m = 0.8             # objects larger than this are clipped
+outlier_k = 12               # statistical outlier removal: neighbours ...
+outlier_std = 2.0            # ... and std ratio
+# Completion of the unseen side: extrude everything seen down to the table plane when the
+# object's lowest seen point is within extrude_max_gap_m of it.
+extrude = true
+extrude_max_gap_m = 0.06
+extrude_layers = 0           # extra copies between the points and the plane (for non-hull meshes)
+# Mirror the points about the vertical plane through the centroid that faces the mean viewing
+# direction (assumes front-back symmetry): "none" or "view".
+symmetry = "none"
+# Object frame axes: "min_area_rect" (footprint rectangle; exact for boxes, defined for square
+# footprints) or "pca" (principal axes of the footprint).
+frame_axes = "min_area_rect"
+model_points = 3000          # surface samples of the mesh used by ICP
+# "hull" mesh: per direction, ignore this fraction of the most extreme points (the plain hull of
+# noisy points is inflated by the noise extremes); 0 = plain convex hull. hull_dirs directions.
+hull_trim_frac = 0.008
+hull_dirs = 256
+
+[objects.tracking]
+# Per-frame point-to-plane ICP of the frame's object points to the model.
+max_correspondence_m = 0.03
+max_iterations = 25
+robust = "tukey"             # "tukey", "huber" or "none"
+min_points = 15
+min_fitness = 0.5            # fraction of points with a model point within max_correspondence_m
+max_jump_m = 0.05            # an ICP correction larger than this is rejected
+max_jump_deg = 25.0
+# Inside a grasp the object follows the rigid motion of the whole hand skeleton (Procrustes of
+# all 21 joints). grasp_dof: degrees of freedom of one stacked-ICP correction of the hand-object
+# offset over the whole grasp: "0" (none), "3" (translation), "6".
+grasp_dof = "0"
+smooth_frames = 2.0          # Gaussian smoothing of the object poses inside a grasp (frames, 0 = off)
+# After a release: one stacked ICP over the static segment with these degrees of freedom when the
+# object is upright (z within rest_max_tilt_deg of the table normal; "3" translation, "4" + yaw,
+# "6"), then it is put upright on the table; otherwise a full 6-DoF ICP.
+static_dof_upright = "3"
+rest_max_tilt_deg = 15.0
+contact_m = 0.035            # fingertip within this of the surface counts as contact
+min_contact_frac = 0.3       # a grasp episode is on this object when contact holds in this fraction of it
+co_motion_mps = 0.05         # outside grasp episodes: object and wrist move together faster than this
+
+[objects.table]
+# RANSAC over scene depth points (not hands), normals within max_tilt_deg of +z.
+frame_step = 6               # use every n-th frame
+blur_px = 5                  # box filter on the depth before back-projection (plane noise)
+max_points = 80000
+threshold_m = 0.012          # inlier distance = threshold_m + threshold_rel x depth
+threshold_rel = 0.012
+max_tilt_deg = 12.0
+max_planes = 4
+min_inlier_frac = 0.03
+iterations = 300
+cell_m = 0.03                # occupancy grid for the support region (polygon = hull of one component)
+floor_min_drop_m = 0.3       # the floor is a horizontal plane at least this far below the table
+default_height_m = 0.75      # height above the floor when no floor plane is seen
+
+[objects.sam2]
+# SAM 2.1 video predictor (official package: pip install
+# "git+https://github.com/facebookresearch/sam2.git"; weights from the Hugging Face hub).
+model = "facebook/sam2.1-hiera-large"   # or -base-plus, -small, -tiny
+device = "cuda"
+max_side = 1024              # frames are downscaled so that their longer side is at most this
+offload_video_to_cpu = true
+mask_threshold = 0.0         # logits > threshold
+
+[objects.open3d]
+method = "poisson"           # "poisson" or "alpha"
+poisson_depth = 8
+density_quantile = 0.05      # remove Poisson vertices with the lowest densities
+alpha = 0.02
+
+[objects.coacd]
+threshold = 0.05             # concavity threshold (smaller = more parts)
+max_convex_hull = -1         # -1 = no limit
+preprocess_mode = "auto"
+seed = 0
+
+[objects.image_to_3d]
+# Generated shape aligned to the fused points (scale, rotation about the vertical, translation).
+model = "sam3d_objects"      # adapter in backends/image_to_3d.py
+config = ""                  # path to the model's pipeline config (checkpoints/hf/pipeline.yaml)
+repo = ""                    # path to a clone of facebookresearch/sam-3d-objects (sys.path)
+seed = 42
+n_yaw = 8                    # initial rotations about +z tried by the alignment
