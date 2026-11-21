@@ -57,6 +57,7 @@
 		FB2200000000000000000013 /* CameraAccess/Views/SensorCardsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000013 /* CameraAccess/Views/SensorCardsView.swift */; };
 		FB2200000000000000000014 /* CameraAccess/Views/VideoPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000014 /* CameraAccess/Views/VideoPanelView.swift */; };
 		FB2200000000000000000015 /* CameraAccess/Recording/RecordingLocation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000015 /* CameraAccess/Recording/RecordingLocation.swift */; };
+		FB2200000000000000000018 /* CameraAccess/Sensors/HeadOrientation.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000018 /* CameraAccess/Sensors/HeadOrientation.swift */; };
 		FB2200000000000000000016 /* CameraAccess/ViewModels/RecordingControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000016 /* CameraAccess/ViewModels/RecordingControl.swift */; };
 		FB2200000000000000000017 /* CameraAccess/Views/StorageCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB2100000000000000000017 /* CameraAccess/Views/StorageCard.swift */; };
 /* End PBXBuildFile section */
@@ -142,6 +143,7 @@
 		FB2100000000000000000013 /* CameraAccess/Views/SensorCardsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Views/SensorCardsView.swift; sourceTree = SOURCE_ROOT; };
 		FB2100000000000000000014 /* CameraAccess/Views/VideoPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Views/VideoPanelView.swift; sourceTree = SOURCE_ROOT; };
 		FB2100000000000000000015 /* CameraAccess/Recording/RecordingLocation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Recording/RecordingLocation.swift; sourceTree = SOURCE_ROOT; };
+		FB2100000000000000000018 /* CameraAccess/Sensors/HeadOrientation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Sensors/HeadOrientation.swift; sourceTree = SOURCE_ROOT; };
 		FB2100000000000000000016 /* CameraAccess/ViewModels/RecordingControl.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/ViewModels/RecordingControl.swift; sourceTree = SOURCE_ROOT; };
 		FB2100000000000000000017 /* CameraAccess/Views/StorageCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraAccess/Views/StorageCard.swift; sourceTree = SOURCE_ROOT; };
 		FC2100000000000000000001 /* Config/Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/Signing.xcconfig; sourceTree = SOURCE_ROOT; };
@@ -196,6 +198,7 @@
 				FB2100000000000000000015 /* CameraAccess/Recording/RecordingLocation.swift */,
 				FB2100000000000000000016 /* CameraAccess/ViewModels/RecordingControl.swift */,
 				FB2100000000000000000017 /* CameraAccess/Views/StorageCard.swift */,
+				FB2100000000000000000018 /* CameraAccess/Sensors/HeadOrientation.swift */,
 				FA2100000000000000000006 /* CameraAccess/PersonalTeam.entitlements */,
 				FA2100000000000000000005 /* CameraAccess/Recording/RecordingStore.swift */,
 				FA2100000000000000000004 /* CameraAccess/Recording/MonotonicClock.swift */,
@@ -483,6 +486,7 @@
 				FB2200000000000000000014 /* CameraAccess/Views/VideoPanelView.swift in Sources */,
 				FB2200000000000000000015 /* CameraAccess/Recording/RecordingLocation.swift in Sources */,
 				FB2200000000000000000016 /* CameraAccess/ViewModels/RecordingControl.swift in Sources */,
+				FB2200000000000000000018 /* CameraAccess/Sensors/HeadOrientation.swift in Sources */,
 				FB2200000000000000000017 /* CameraAccess/Views/StorageCard.swift in Sources */,
 				FA2200000000000000000005 /* CameraAccess/Recording/RecordingStore.swift in Sources */,
 				FA2200000000000000000004 /* CameraAccess/Recording/MonotonicClock.swift in Sources */,

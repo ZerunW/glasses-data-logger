@@ -34,6 +34,13 @@ final class SensorManager {
   var acceleration: [SensorPoint] = []
   var gyroscope: [SensorPoint] = []
   var magnetometer: [SensorPoint] = []
+  /// True once this session has delivered a magnetometer value. Some glasses report only the
+  /// accelerometer and gyroscope, and the Motion card then hides its empty Mag chart.
+  var hasMagnetometer = false
+  /// Head roll/pitch/yaw estimated from the accelerometer and gyroscope when the glasses send no
+  /// orientation (yaw relative to the start). Nil while the SDK provides an orientation.
+  var estimatedHeadAngles: EulerDegrees?
+  @ObservationIgnored private var headFilter = HeadOrientationFilter()
   var inputs: [SensorInput] = []
   var samplesPerSecond = 0
   var onMotion: (@Sendable (MWDATMotion.MotionSample, UInt64) -> Void)? { didSet { callbacks.setMotion(onMotion) } }
@@ -68,6 +75,8 @@ final class SensorManager {
     self.session = session
     inputsError = nil; motionError = nil; latestSample = nil; latestDeviceState = nil
     acceleration.removeAll(); gyroscope.removeAll(); magnetometer.removeAll(); inputs.removeAll()
+    hasMagnetometer = false
+    headFilter.reset(); estimatedHeadAngles = nil
     recentSampleTimes.removeAll(); samplesPerSecond = 0
     lastDisplayUpdateNs = 0
     let current = generation
@@ -188,18 +197,27 @@ final class SensorManager {
   }
   private func accept(_ sample: MotionSample, time: UInt64) {
     recentSampleTimes.append(time)
+    // Every sample, before the display limit below: the filter integrates the gyroscope.
+    if sample.orientation == nil {
+      headFilter.update(
+        accelerometer: sample.accelerometer.map { SIMD3(Double($0.x), Double($0.y), Double($0.z)) },
+        gyroscope: sample.gyroscope.map { SIMD3(Double($0.x), Double($0.y), Double($0.z)) },
+        timeNs: sample.timestampNs > 0 ? sample.timestampNs : Int64(time))
+    }
     // Recording receives every sample on the consumer task. Limit chart and
     // observable updates to 10 Hz so high-rate streams do not redraw the entire panel.
     guard time >= lastDisplayUpdateNs,
       time - lastDisplayUpdateNs >= 100_000_000 || lastDisplayUpdateNs == 0 else { return }
     lastDisplayUpdateNs = time
     latestSample = sample
+    estimatedHeadAngles = sample.orientation == nil ? headFilter.angles : nil
     func append(_ vector: MWDATMotion.Vector3?, to points: inout [SensorPoint]) {
       if let vector { points.append(SensorPoint(timeNs: time, x: Double(vector.x), y: Double(vector.y), z: Double(vector.z))) }
     }
     append(sample.accelerometer, to: &acceleration)
     append(sample.gyroscope, to: &gyroscope)
     append(sample.magnetometer, to: &magnetometer)
+    if sample.magnetometer != nil, !hasMagnetometer { hasMagnetometer = true }
     refreshWindow(MonotonicClock.nowNanoseconds())
   }
   private func refreshWindow(_ now: UInt64) {
@@ -251,6 +269,8 @@ final class SensorManager {
     acceleration.removeAll()
     gyroscope.removeAll()
     magnetometer.removeAll()
+    hasMagnetometer = false
+    headFilter.reset(); estimatedHeadAngles = nil
     motionState = "Disconnected"; inputsState = "Disconnected"
   }
 }

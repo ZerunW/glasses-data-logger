@@ -135,11 +135,16 @@ private struct MotionCard: View {
   var viewModel: CameraViewModel
   @State private var channel: MotionChannel = .accelerometer
 
+  /// Mag appears only once the glasses have sent a magnetometer value.
+  private var channels: [MotionChannel] {
+    viewModel.sensorManager.hasMagnetometer ? MotionChannel.allCases : [.accelerometer, .gyroscope]
+  }
+
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
       HStack(spacing: 8) {
         Picker("Sensor", selection: $channel) {
-          ForEach(MotionChannel.allCases) { channel in
+          ForEach(channels) { channel in
             Text(verbatim: channel.title).tag(channel)
           }
         }
@@ -156,6 +161,9 @@ private struct MotionCard: View {
         .frame(maxHeight: .infinity)
 
       MotionFooter(sensorManager: viewModel.sensorManager, channel: channel)
+    }
+    .onChange(of: viewModel.sensorManager.hasMagnetometer) { _, hasMagnetometer in
+      if !hasMagnetometer, channel == .magnetometer { channel = .accelerometer }
     }
   }
 }

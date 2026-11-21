@@ -2613,11 +2613,18 @@ dialog.wide[open] { display: flex; flex-direction: column; }
       });
       box.append(head, chart, vals);
       grid.appendChild(box);
-      imuNodes[item.key] = { chart, spans };
+      imuNodes[item.key] = { chart, spans, box };
     }
   }
+  // Some glasses report no magnetometer: the Mag chart appears only once a value arrives
+  // from the current motion source.
+  let magSeen = false;
+  let magSource = null;
   function renderMotion(st) {
     const m = st.motion;
+    if (m.source !== magSource) { magSource = m.source; magSeen = false; }
+    if (Array.isArray(m.mag) && m.mag.some(isNum)) magSeen = true;
+    imuNodes.mag.box.hidden = !magSeen;
     for (const item of IMU) {
       const values = m[item.key];
       imuNodes[item.key].spans.forEach((span, i) => {

@@ -212,11 +212,15 @@ private struct MotionSummaryRows: View {
 
   var body: some View {
     let sample = sensorManager.latestSample
-    let angles = eulerDegrees(sample?.orientation)
+    // The SDK's orientation when the glasses send one; otherwise the phone's own estimate from
+    // the accelerometer and gyroscope, whose yaw counts from the start (no magnetometer).
+    let reported = eulerDegrees(sample?.orientation)
+    let angles = reported ?? sensorManager.estimatedHeadAngles
+    let relativeYaw = reported == nil && angles != nil
     VStack(alignment: .leading, spacing: 2) {
       SummaryRow(label: "Roll", value: Self.degrees(angles?.roll))
       SummaryRow(label: "Pitch", value: Self.degrees(angles?.pitch))
-      SummaryRow(label: "Yaw", value: Self.degrees(angles?.yaw))
+      SummaryRow(label: relativeYaw ? "Yaw (rel.)" : "Yaw", value: Self.degrees(angles?.yaw))
       SummaryRow(
         label: "IMU", value: sample == nil ? unavailableText : "\(sensorManager.samplesPerSecond)/s",
         identifier: "summary_imu_rate")
